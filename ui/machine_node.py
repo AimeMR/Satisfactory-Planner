@@ -49,7 +49,7 @@ _HEADER_ALPHA     = 200          # header strip alpha
 _BODY_ALPHA       = 180
 
 NODE_W = 230
-NODE_H = 148
+NODE_H = 160
 CORNER = 10
 # Body starts below the header
 _BODY_Y = 36
@@ -85,7 +85,7 @@ class MachineNode(QGraphicsItem):
 
         # Runtime production result (filled by apply_result())
         self._output_rate: float = 0.0
-        self._input_rate:  float = 0.0
+        self._inputs: list[dict] = []
         self._status: str        = "no_recipe"
 
         self.setPos(pos)
@@ -181,8 +181,14 @@ class MachineNode(QGraphicsItem):
         if self._combo is None:
             return
         self.current_recipe_id = self._combo.currentData()
-        # Trigger engine recalc through the scene
         scene = self.scene()
+        if not self.current_recipe_id:
+            # Clear stats immediately if recipe deselected
+            self._output_rate = 0.0
+            self._inputs = []
+            self._status = "no_recipe"
+            self.update()
+        
         if scene and hasattr(scene, "recalculate"):
             scene.recalculate()
 
@@ -260,14 +266,6 @@ class MachineNode(QGraphicsItem):
                              Qt.AlignVCenter | Qt.AlignLeft,
                              f"OUT: {self._output_rate:.1f} items/min")
 
-            # Input consumption (skip for pure producers like miners)
-            if self._input_rate > 0:
-                y += 16
-                painter.setPen(QPen(QColor("#aaddff")))
-                painter.drawText(QRectF(14, y, NODE_W - 28, 16),
-                                 Qt.AlignVCenter | Qt.AlignLeft,
-                                 f" IN: {self._input_rate:.1f} items/min")
-
             # Energy
             y += 16
             energy_mw = self._calc_energy_mw()
@@ -275,6 +273,22 @@ class MachineNode(QGraphicsItem):
             painter.drawText(QRectF(14, y, NODE_W - 28, 16),
                              Qt.AlignVCenter | Qt.AlignLeft,
                              f" [E]: {energy_mw:.1f} MW")
+
+            # ── Inputs Section (with separator line) ─────────────────────
+            if self._inputs:
+                y += 20
+                painter.setPen(QPen(QColor("#44446a"), 1))
+                painter.drawLine(14, y, NODE_W - 14, y)
+                y += 6
+                
+                inp_font = QFont("Segoe UI", 8)
+                painter.setFont(inp_font)
+                painter.setPen(QPen(QColor("#aaddff")))
+                for inp in self._inputs:
+                    painter.drawText(QRectF(14, y, NODE_W - 28, 14),
+                                     Qt.AlignVCenter | Qt.AlignLeft,
+                                     f"► {inp['rate']:.1f} {inp['material']}")
+                    y += 14
 
         # ── Port labels ───────────────────────────────────────────────────────────────
         port_font = QFont("Segoe UI", 8)
@@ -338,8 +352,13 @@ class MachineNode(QGraphicsItem):
     def apply_result(self, result) -> None:
         """Called by FactoryScene.recalculate() with a NodeResult object."""
         self._output_rate = result.output_rate
-        self._input_rate  = result.input_rate_required
+        self._inputs      = result.inputs
         self._status      = result.status
+        
+        if self._status == "no_recipe":
+            self._output_rate = 0.0
+            self._inputs = []
+
         self.update()   # trigger repaint
 
     def _calc_energy_mw(self) -> float:

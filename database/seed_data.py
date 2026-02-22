@@ -13,32 +13,22 @@ from .crud import (
 
 def seed_db() -> None:
     """Seed all baseline game data. Safe to call multiple times."""
-    from .db import get_connection
-    conn = get_connection()
-
     if not get_all_materials():
         _seed_materials()
         _seed_machines()
         _seed_recipes()
+        _seed_mining_recipes()
         print("[DB] Seed data inserted successfully.")
     else:
         print("[DB] Seed data already present, skipping.")
-
-    # Mining recipes may be absent on older DBs — seed independently
-    has_mining = conn.execute(
-        "SELECT COUNT(*) FROM Recipes WHERE input_material_id IS NULL"
-    ).fetchone()[0]
-    if not has_mining:
-        _seed_mining_recipes()
-        print("[DB] Mining recipes added.")
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _seed_materials() -> dict[str, int]:
-    """Insert all base materials and return a name→id mapping."""
+def _seed_materials() -> None:
+    """Insert all base materials."""
     items = [
         # Solids
         ("Iron Ore",       "solid"),
@@ -99,87 +89,53 @@ def _seed_machines() -> None:
 
 
 def _seed_recipes() -> None:
-    """
-    Insert base recipes.
-    We look up material/machine IDs by re-querying (seed runs once, so it's fine).
-    """
+    """Insert base recipes with multiple inputs/outputs support."""
     from .db import get_connection
     conn = get_connection()
 
     def mat(name: str) -> int:
         row = conn.execute("SELECT id FROM Materials WHERE name = ?", (name,)).fetchone()
-        if not row:
-            raise ValueError(f"Material not found: {name}")
-        return row["id"]  # type: ignore[index]
+        return row["id"]
 
     def mach(name: str) -> int:
         row = conn.execute("SELECT id FROM Machines WHERE name = ?", (name,)).fetchone()
-        if not row:
-            raise ValueError(f"Machine not found: {name}")
-        return row["id"]  # type: ignore[index]
+        return row["id"]
 
-    # Quantities are PER-CYCLE (not per-minute).
-    # Engine formula: items_per_min = (qty / craft_time_s) * 60
-    #
-    # Quick reference for expected rates:
-    #   Smelt Iron:   1 ore in / 1 ingot out / 2s  → 30 ore/min consumed, 30 ingot/min produced
-    #   Iron Plate:   3 ingot in / 2 plate out / 6s → 30 ingot/min consumed, 20 plate/min produced
-    #   Iron Rod:     1 ingot in / 1 rod out / 4s   → 15 each/min
-    #   Wire:         1 cu-ingot in / 2 wire out / 4s → 15 in, 30 out /min
-    #   Cable:        4 wire in / 2 cable out / 4s  → 60 in, 30 out /min
-    #   Concrete:     3 limestone in / 1 concrete out / 4s → 45 in, 15 out /min
-    #   Steel Beam:   4 steel in / 1 beam out / 4s  → 60 in, 15 out /min
-    #   Steel Pipe:   3 steel in / 2 pipe out / 6s  → 30 in, 20 out /min
-    #   Screw:        1 rod in / 4 screw out / 6s   → 10 in, 40 out /min
-    recipes = [
-        # (name, machine, input_mat, in_qty, output_mat, out_qty, craft_time_s)
-        # --- Smelter ---
-        ("Smelt Iron",            "Smelter",     "Iron Ore",              1, "Iron Ingot",             1,  2.0),
-        ("Smelt Copper",          "Smelter",     "Copper Ore",            1, "Copper Ingot",           1,  2.0),
-        ("Smelt Caterium",        "Smelter",     "Caterium Ore",          3, "Caterium Ingot",         1,  4.0),
-        # --- Foundry ---
-        ("Smelt Steel",           "Foundry",     "Iron Ore",              3, "Steel Ingot",            3,  4.0),
-        # --- Constructor ---
-        ("Iron Plate",            "Constructor", "Iron Ingot",            3, "Iron Plate",             2,  6.0),
-        ("Iron Rod",              "Constructor", "Iron Ingot",            1, "Iron Rod",               1,  4.0),
-        ("Wire",                  "Constructor", "Copper Ingot",          1, "Wire",                   2,  4.0),
-        ("Cable",                 "Constructor", "Wire",                  4, "Cable",                  2,  4.0),
-        ("Concrete",              "Constructor", "Limestone",             3, "Concrete",               1,  4.0),
-        ("Steel Beam",            "Constructor", "Steel Ingot",           4, "Steel Beam",             1,  4.0),
-        ("Steel Pipe",            "Constructor", "Steel Ingot",           3, "Steel Pipe",             2,  6.0),
-        ("Screw",                 "Constructor", "Iron Rod",              1, "Screw",                  4,  6.0),
-        ("Quickwire",             "Constructor", "Caterium Ingot",        1, "Quickwire",              5,  5.0),
-        ("Quartz Crystal",        "Constructor", "Raw Quartz",            5, "Quartz Crystal",         3,  8.0),
-        ("Silica",                "Constructor", "Raw Quartz",            4, "Silica",                 7, 11.0),
-        # --- Assembler ---
-        ("Reinforced Iron Plate", "Assembler",   "Iron Plate",            6, "Reinforced Iron Plate",  1, 12.0),
-        ("Rotor",                 "Assembler",   "Iron Rod",              5, "Rotor",                  1, 15.0),
-        ("Modular Frame",         "Assembler",   "Reinforced Iron Plate", 3, "Modular Frame",          2, 60.0),
+    # Simple 1-to-1 recipes
+    simple = [
+        # (name, mach, in_name, in_qty, out_name, out_qty, time)
+        ("Smelt Iron",     "Smelter",     "Iron Ore",     1, "Iron Ingot",     1, 2.0),
+        ("Smelt Copper",   "Smelter",     "Copper Ore",   1, "Copper Ingot",   1, 2.0),
+        ("Iron Plate",     "Constructor", "Iron Ingot",   3, "Iron Plate",     2, 6.0),
+        ("Iron Rod",       "Constructor", "Iron Ingot",   1, "Iron Rod",       1, 4.0),
+        ("Wire",           "Constructor", "Copper Ingot", 1, "Wire",           2, 4.0),
+        ("Screw",          "Constructor", "Iron Rod",     1, "Screw",          4, 6.0),
     ]
 
-    for name, machine, in_mat, in_qty, out_mat, out_qty, craft_time in recipes:
-        add_recipe(
-            name=name,
-            machine_id=mach(machine),
-            input_material_id=mat(in_mat),
-            input_qty=in_qty,
-            output_material_id=mat(out_mat),
-            output_qty=out_qty,
-            craft_time=craft_time,
-        )
+    for name, mname, in_name, in_qty, out_name, out_qty, time in simple:
+        ingredients = [
+            {"material_id": mat(in_name),  "amount": in_qty,  "is_input": 1},
+            {"material_id": mat(out_name), "amount": out_qty, "is_input": 0},
+        ]
+        add_recipe(name, mach(mname), ingredients, time)
+
+    # Assembler 2-to-1 recipes
+    assembler = [
+        # name, in1, q1, in2, q2, out, qout, time
+        ("Reinforced Iron Plate", "Iron Plate", 6, "Screw", 12, "Reinforced Iron Plate", 1, 12.0),
+        ("Rotor",                 "Iron Rod",   5, "Screw", 25, "Rotor",                 1, 15.0),
+        ("Modular Frame",         "Reinforced Iron Plate", 3, "Iron Rod", 12, "Modular Frame", 2, 60.0),
+    ]
+    for name, i1, q1, i2, q2, out, qout, time in assembler:
+        ingredients = [
+            {"material_id": mat(i1),  "amount": q1,   "is_input": 1},
+            {"material_id": mat(i2),  "amount": q2,   "is_input": 1},
+            {"material_id": mat(out), "amount": qout, "is_input": 0},
+        ]
+        add_recipe(name, mach("Assembler"), ingredients, time)
 
 
 def _seed_mining_recipes() -> None:
-    """
-    Add mining / extraction recipes (no belt input, pure producers).
-
-    Rates (normal purity, 100% clock):
-      Miner Mk.1 : 60 /min  (qty=1, craft_time=1s)
-      Miner Mk.2 : 120/min  (qty=2, craft_time=1s)
-      Miner Mk.3 : 240/min  (qty=4, craft_time=1s)
-      Water Extractor : 120 m3/min
-      Oil Extractor   :  60 m3/min
-    """
     from .db import get_connection
     conn = get_connection()
 
@@ -191,46 +147,16 @@ def _seed_mining_recipes() -> None:
         row = conn.execute("SELECT id FROM Machines WHERE name = ?", (name,)).fetchone()
         return row["id"]
 
-    solid_ores = [
-        "Iron Ore", "Copper Ore", "Limestone", "Coal", "Raw Quartz", "Caterium Ore"
-    ]
-    miners = [
-        ("Miner Mk.1", 1, 1.0),   # out_qty, craft_time -> 60/min
-        ("Miner Mk.2", 2, 1.0),   # -> 120/min
-        ("Miner Mk.3", 4, 1.0),   # -> 240/min
-    ]
+    ores = ["Iron Ore", "Copper Ore", "Limestone", "Coal", "Raw Quartz", "Caterium Ore"]
+    miners = [("Miner Mk.1", 1), ("Miner Mk.2", 2), ("Miner Mk.3", 4)]
 
-    for ore in solid_ores:
-        ore_id = mat(ore)
-        for machine_name, out_qty, craft_time in miners:
-            add_recipe(
-                name=f"Mine {ore} ({machine_name})",
-                machine_id=mach(machine_name),
-                input_material_id=None,
-                input_qty=0,
-                output_material_id=ore_id,
-                output_qty=out_qty,
-                craft_time=craft_time,
-            )
+    for ore in ores:
+        oid = mat(ore)
+        for mname, qty in miners:
+            ing = [{"material_id": oid, "amount": qty, "is_input": 0}]
+            add_recipe(f"Mine {ore} ({mname})", mach(mname), ing, 1.0)
 
-    # Water Extractor: 120 m3/min (qty=2, ct=1s)
-    add_recipe(
-        name="Extract Water",
-        machine_id=mach("Water Extractor"),
-        input_material_id=None,
-        input_qty=0,
-        output_material_id=mat("Water"),
-        output_qty=2,
-        craft_time=1.0,
-    )
+    # Water Extractor
+    add_recipe("Extract Water", mach("Water Extractor"), 
+               [{"material_id": mat("Water"), "amount": 2, "is_input": 0}], 1.0)
 
-    # Oil Extractor: 60 m3/min (qty=1, ct=1s)
-    add_recipe(
-        name="Extract Crude Oil",
-        machine_id=mach("Oil Extractor"),
-        input_material_id=None,
-        input_qty=0,
-        output_material_id=mat("Crude Oil"),
-        output_qty=1,
-        craft_time=1.0,
-    )

@@ -83,8 +83,11 @@ class FactoryScene(QGraphicsScene):
                 if src_node.current_recipe_id is not None:
                     from database.crud import get_recipe_by_id
                     recipe = get_recipe_by_id(src_node.current_recipe_id)
-                    if recipe:
-                        mat_id = recipe["output_material_id"]
+                    if recipe and "materials" in recipe:
+                        # Find the first output component
+                        outputs = [m for m in recipe["materials"] if not m["is_input"]]
+                        if outputs:
+                            mat_id = outputs[0]["material_id"]
 
                 line = ConnectionLine(
                     self._drag_src_port, target,
@@ -191,7 +194,10 @@ class FactoryScene(QGraphicsScene):
                 src_r = recipe_map.get(src_rid)
                 tgt_r = recipe_map.get(tgt_rid)
                 if src_r and tgt_r:
-                    mismatch = (src_r["output_material_id"] != tgt_r["input_material_id"])
+                    # Check if any output of src matches any input of tgt
+                    src_outs = {m["material_id"] for m in src_r.get("materials", []) if not m["is_input"]}
+                    tgt_ins  = {m["material_id"] for m in tgt_r.get("materials", []) if m["is_input"]}
+                    mismatch = len(src_outs.intersection(tgt_ins)) == 0
             conn.set_mismatch(mismatch)
 
 

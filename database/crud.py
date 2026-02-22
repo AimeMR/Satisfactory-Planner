@@ -64,40 +64,56 @@ def add_machine(name: str, base_power: float,
 # Recipes
 # ---------------------------------------------------------------------------
 
+def _attach_materials_to_recipe(recipe_row: sqlite3.Row) -> dict:
+    recipe = dict(recipe_row)
+    rows = get_connection().execute("""
+        SELECT rm.*, m.name as material_name
+        FROM Recipe_Materials rm
+        JOIN Materials m ON rm.material_id = m.id
+        WHERE rm.recipe_id = ?
+    """, (recipe["id"],)).fetchall()
+    recipe["materials"] = [dict(r) for r in rows]
+    return recipe
+
+
 def get_all_recipes() -> list[dict]:
     rows = get_connection().execute("SELECT * FROM Recipes").fetchall()
-    return [dict(r) for r in rows]
+    return [_attach_materials_to_recipe(r) for r in rows]
 
 
 def get_recipes_for_machine(machine_id: int) -> list[dict]:
     rows = get_connection().execute(
         "SELECT * FROM Recipes WHERE machine_id = ?", (machine_id,)
     ).fetchall()
-    return [dict(r) for r in rows]
+    return [_attach_materials_to_recipe(r) for r in rows]
 
 
 def get_recipe_by_id(recipe_id: int) -> dict | None:
     row = get_connection().execute(
         "SELECT * FROM Recipes WHERE id = ?", (recipe_id,)
     ).fetchone()
-    return dict(row) if row else None
+    return _attach_materials_to_recipe(row) if row else None
 
 
-def add_recipe(name: str, machine_id: int,
-               input_material_id: int, input_qty: float,
-               output_material_id: int, output_qty: float,
-               craft_time: float = 2.0) -> int:
+def add_recipe(name: str, machine_id: int, ingredients: list[dict], craft_time: float = 2.0) -> int:
+    """
+    Insert a recipe and its materials.
+    ingredients: List of {"material_id": int, "amount": float, "is_input": bool}
+    """
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO Recipes "
-        "(name, machine_id, input_material_id, input_qty, "
-        " output_material_id, output_qty, craft_time) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (name, machine_id, input_material_id, input_qty,
-         output_material_id, output_qty, craft_time),
+        "INSERT INTO Recipes (name, machine_id, craft_time) VALUES (?, ?, ?)",
+        (name, machine_id, craft_time),
     )
+    recipe_id = cur.lastrowid
+    for ing in ingredients:
+        conn.execute(
+            "INSERT INTO Recipe_Materials (recipe_id, material_id, amount, is_input) "
+            "VALUES (?, ?, ?, ?)",
+            (recipe_id, ing["material_id"], ing["amount"], ing["is_input"]),
+        )
     conn.commit()
-    return cur.lastrowid
+    return recipe_id
 
 
 # ---------------------------------------------------------------------------

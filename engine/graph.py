@@ -21,9 +21,13 @@ class NodeResult:
     node_id: int
     machine_name: str
     recipe_name: str | None
-    output_rate: float          # items/min produced
-    input_rate_required: float  # items/min consumed
+    output_rate: float          # Main items/min produced
+    inputs: list[dict]          # List of {"material": str, "rate": float}
     status: str                 # "ok" | "no_recipe" | "disconnected"
+
+    @property
+    def total_input_rate(self) -> float:
+        return sum(i["rate"] for i in self.inputs)
 
 
 @dataclass
@@ -126,7 +130,7 @@ def calculate_production(
                 machine_name=machine_name,
                 recipe_name=None,
                 output_rate=0.0,
-                input_rate_required=0.0,
+                inputs=[],
                 status="no_recipe",
             )
             node_output_rate[node_id] = 0.0
@@ -135,25 +139,29 @@ def calculate_production(
         clock_speed = node.get("clock_speed", 1.0)
         craft_time  = recipe["craft_time"]          # seconds per cycle
 
-        # items/min = (output_qty / craft_time) * 60 * clock_speed
-        output_rate = (recipe["output_qty"] / craft_time) * 60.0 * clock_speed
+        # Each recipe row in DB now has recipe['materials'] list attached by CRUD.
+        items = recipe.get("materials", [])
+        
+        # Calculate items/min for each component
+        # Formula: items_per_min = (amount / craft_time) * 60 * clock_speed
+        input_list = []
+        node_output_rate[node_id] = 0.0
 
-        # Mining/extraction recipes have no belt input (input_qty == 0 or None)
-        raw_input_qty = recipe.get("input_qty") or 0
-        if raw_input_qty > 0 and recipe.get("input_material_id"):
-            input_rate = (raw_input_qty / craft_time) * 60.0 * clock_speed
-        else:
-            input_rate = 0.0   # miners are pure producers — no input required
-
-        node_output_rate[node_id] = output_rate
-        recipe_name = recipe["name"]
+        for item in items:
+            rate = (item["amount"] / craft_time) * 60.0 * clock_speed
+            if item["is_input"]:
+                input_list.append({"material": item["material_name"], "rate": rate})
+            else:
+                # For now we assume one primary output for flow splitting
+                # But we sum them if there are multiple (e.g. byproducts)
+                node_output_rate[node_id] += rate
 
         result.nodes[node_id] = NodeResult(
             node_id=node_id,
             machine_name=machine_name,
-            recipe_name=recipe_name,
-            output_rate=round(output_rate, 4),
-            input_rate_required=round(input_rate, 4),
+            recipe_name=recipe["name"],
+            output_rate=round(node_output_rate[node_id], 4),
+            inputs=input_list,
             status="ok",
         )
 
@@ -171,7 +179,8 @@ def calculate_production(
         src_rate       = total_src_rate / num_conns if num_conns > 0 else 0.0
 
         tgt_node_r  = result.nodes.get(tgt_id)
-        demand      = tgt_node_r.input_rate_required if tgt_node_r else 0.0
+        # Total demand is the sum of inputs required by target
+        demand = tgt_node_r.total_input_rate if tgt_node_r else 0.0
 
         mat = material_map.get(conn["material_id"]) if conn.get("material_id") else None
         mat_name = mat["name"] if mat else None
@@ -212,7 +221,8 @@ def print_results(result: GraphResult) -> None:
         if nr.recipe_name:
             print(f"       Recipe  : {nr.recipe_name}")
             print(f"       Produces: {nr.output_rate} items/min")
-            print(f"       Consumes: {nr.input_rate_required} items/min")
+            for inp in nr.inputs:
+                print(f"       Consumes: {inp['rate']} {inp['material']}/min")
         else:
             print("       (no recipe assigned)")
 
