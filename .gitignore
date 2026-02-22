@@ -1,0 +1,69 @@
+# =========================
+# 1. Database Files
+# =========================
+# Ignore local SQLite databases so you don't commit your test factory layouts
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# =========================
+# 2. Python (If using PyQt/PySide)
+# =========================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+venv/
+env/
+.venv/
+.env/
+
+# Qt UI compilation files (if you generate python files from .ui files)
+*_ui.py
+*_rc.py
+
+# =========================
+# 3. C++ & Qt (If using native C++)
+# =========================
+# Build directories (CMake or QMake)
+build/
+bin/
+out/
+
+# Compiled Object files
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Qt-specific generated files
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+Makefile*
+*.pro.user
+*.pro.user.*
+
+# =========================
+# 4. IDEs and OS Files
+# =========================
+# VS Code
+.vscode/
+
+# Visual Studio
+.vs/
+*.sln.docstates
+*.suo
+
+# JetBrains (PyCharm / CLion)
+.idea/
+*.iml
+
+# OS generated files
+.DS_Store
+Thumbs.db

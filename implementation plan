@@ -1,0 +1,56 @@
+# App Implementation Plan: Satisfactory Factory Manager
+
+This document outlines the architecture and phased development of a desktop application for managing *Satisfactory* production lines, utilizing a native desktop framework for high-performance node graphics.
+
+---
+
+## 1. Architecture & Tech Stack
+
+* **Core Language:** Python (or C++)
+* **Frontend Framework:** Qt (via PyQt6/PySide6 for Python, or native Qt for C++)
+* **Database:** SQLite (local `.db` file)
+* **Graphics Engine:** Qt's `QGraphicsView` and `QGraphicsScene` for handling the grid, zooming, and node drag-and-drop physics natively.
+
+---
+
+## 2. Database Schema (SQLite)
+
+Store base game data and user layouts using a relational structure. 
+
+| Table Name | Description | Key Columns |
+| :--- | :--- | :--- |
+| **Materials** | All items and fluids. | `id`, `name`, `type` (solid/liquid) |
+| **Machines** | Base machine blueprints. | `id`, `name`, `base_power`, `inputs_allowed`, `outputs_allowed` |
+| **Recipes** | The math for production. | `id`, `machine_id`, `input_material_id`, `input_qty`, `output_material_id`, `output_qty` |
+| **Placed_Nodes** | User's layout instances. | `id`, `machine_id`, `recipe_id`, `pos_x`, `pos_y` |
+| **Connections** | Belts and pipes. | `id`, `source_node_id`, `target_node_id`, `material_id`, `current_velocity` |
+
+---
+
+## 3. Implementation Phases
+
+### Phase 1: Core Engine & Database
+1.  Initialize the SQLite database to store game materials, machines, and recipes.
+2.  Write the graph traversal engine to calculate production chains (e.g., if Node A produces 30 iron/min and Node B consumes 60 iron/min, flag a 30/min deficit).
+3.  Implement CRUD operations to save and load user factory layouts to the database.
+
+### Phase 2: The Grid Workspace (Frontend)
+1.  Set up the main application window.
+2.  Implement `QGraphicsScene` as the infinite invisible workspace.
+3.  Implement `QGraphicsView` as the viewport. Override the `drawBackground` method to render a continuous dot or line grid.
+4.  Add mouse wheel event listeners to the viewport to handle zooming and middle-mouse-click for panning.
+
+### Phase 3: Machine Nodes
+1.  Create a custom `MachineNode` class inheriting from `QGraphicsItem` (or `QGraphicsProxyWidget` to embed UI elements easily).
+2.  Draw the main rectangular body of the machine.
+3.  Embed a UI layout containing the machine **Name**, a **Dropdown** to select the recipe/material, and a text block displaying the **Velocity** (items/min).
+4.  Attach small circular objects to the left (Inputs) and right (Outputs) edges of the rectangle to act as connection dots.
+5.  Enable the `ItemIsMovable` flag so Qt automatically handles drag-and-drop coordinates.
+
+### Phase 4: Dynamic Connections (Belts & Pipes)
+1.  Create a `ConnectionLine` class inheriting from `QGraphicsPathItem` to draw a smooth Bezier curve.
+2.  Add a text label anchored to the midpoint of the curve displaying the **Material Name** and **Velocity** (e.g., "Copper Wire - 60/min").
+3.  **The Auto-Update Logic:** Override the `itemChange` event in your `MachineNode` class. Whenever the node's X/Y coordinates change, trigger a function that recalculates the start and end points of all attached `ConnectionLine` objects. This ensures lines perfectly track moving machines without screen lag.
+
+### Phase 5: State Updates & Polish
+1.  Implement connection logic: User clicks an output dot and drags the mouse to an input dot to
