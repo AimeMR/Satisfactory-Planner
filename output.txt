@@ -1,0 +1,23 @@
+﻿[DB] Tables created (or already exist).
+[DB] Seed data inserted successfully.
+[LAYOUT] Placed Node 1 (Smelter) and Node 2 (Constructor).
+[LAYOUT] Created Connection 1 (Iron Ingot belt).
+
+============================================================
+  PRODUCTION CHAIN ANALYSIS
+============================================================
+
+[NODES]
+  [OK]   Node 1 -- Smelter
+       Recipe  : Smelt Iron
+       Produces: 30.0 items/min
+       Consumes: 30.0 items/min
+  [OK]   Node 2 -- Constructor
+       Recipe  : Iron Plate
+       Produces: 20.0 items/min
+       Consumes: 30.0 items/min
+
+[CONNECTIONS]
+  [OK]     Connection 1: Node 1 -> Node 2  | Iron Ingot  | 30.0 items/min  | OK
+============================================================
+
