@@ -153,6 +153,7 @@ class FactoryScene(QGraphicsScene):
         from engine.graph import build_graph, calculate_production
         from database.crud import (
             get_all_recipes, get_all_machines, get_all_materials,
+            get_recipe_by_id,
         )
 
         placed = [n.to_db_dict() for n in self._machines]
@@ -162,18 +163,36 @@ class FactoryScene(QGraphicsScene):
         machines  = get_all_machines()
         materials = get_all_materials()
 
+        recipe_map = {r["id"]: r for r in recipes}
+
         graph  = build_graph(placed, conns)
         result = calculate_production(graph, recipes, machines, materials)
 
         for node in self._machines:
-            nr = result.nodes.get(node.node_db_id)
+            lookup_id = node.node_db_id or id(node)
+            nr = result.nodes.get(lookup_id)
             if nr:
                 node.apply_result(nr)
 
         for conn in self._connections:
-            cr = result.connections.get(conn.conn_db_id)
+            # 1. Push flow/status from production engine
+            lookup_id = conn.conn_db_id or id(conn)
+            cr = result.connections.get(lookup_id)
             if cr:
                 conn.apply_result(cr)
+
+            # 2. Check material mismatch: source output ≠ target input
+            src_node = conn.src_port.parent_node
+            tgt_node = conn.tgt_port.parent_node
+            mismatch = False
+            src_rid = src_node.current_recipe_id
+            tgt_rid = tgt_node.current_recipe_id
+            if src_rid and tgt_rid:
+                src_r = recipe_map.get(src_rid)
+                tgt_r = recipe_map.get(tgt_rid)
+                if src_r and tgt_r:
+                    mismatch = (src_r["output_material_id"] != tgt_r["input_material_id"])
+            conn.set_mismatch(mismatch)
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +223,7 @@ class FactoryView(QGraphicsView):
         self.setRenderHint(QPainter.SmoothPixmapTransform)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
-        self.setDragMode(QGraphicsView.NoDrag)     # we handle pan ourselves
+        self.setDragMode(QGraphicsView.RubberBandDrag)  # left-drag on empty = select rect
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setFrameShape(self.Shape.NoFrame)
@@ -280,3 +299,29 @@ class FactoryView(QGraphicsView):
             event.accept()
         else:
             super().mouseReleaseEvent(event)
+
+    # ------------------------------------------------------------------
+    # Keyboard: Delete / Backspace removes all selected items
+    # ------------------------------------------------------------------
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            scene = self.scene()
+            # Collect selected nodes and connections (copy list — deletion mutates it)
+            from ui.machine_node import MachineNode
+            from ui.connection_line import ConnectionLine
+            selected_nodes = [
+                item for item in scene.selectedItems()
+                if isinstance(item, MachineNode)
+            ]
+            selected_conns = [
+                item for item in scene.selectedItems()
+                if isinstance(item, ConnectionLine)
+            ]
+            # Delete connections first, then nodes
+            for conn in selected_conns:
+                conn._delete_self()
+            for node in selected_nodes:
+                node._delete_self()
+            event.accept()
+        else:
+            super().keyPressEvent(event)

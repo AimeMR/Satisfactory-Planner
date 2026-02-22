@@ -13,14 +13,24 @@ from .crud import (
 
 def seed_db() -> None:
     """Seed all baseline game data. Safe to call multiple times."""
-    if get_all_materials():
-        print("[DB] Seed data already present, skipping.")
-        return
+    from .db import get_connection
+    conn = get_connection()
 
-    _seed_materials()
-    _seed_machines()
-    _seed_recipes()
-    print("[DB] Seed data inserted successfully.")
+    if not get_all_materials():
+        _seed_materials()
+        _seed_machines()
+        _seed_recipes()
+        print("[DB] Seed data inserted successfully.")
+    else:
+        print("[DB] Seed data already present, skipping.")
+
+    # Mining recipes may be absent on older DBs — seed independently
+    has_mining = conn.execute(
+        "SELECT COUNT(*) FROM Recipes WHERE input_material_id IS NULL"
+    ).fetchone()[0]
+    if not has_mining:
+        _seed_mining_recipes()
+        print("[DB] Mining recipes added.")
 
 
 # ---------------------------------------------------------------------------
@@ -157,3 +167,70 @@ def _seed_recipes() -> None:
             output_qty=out_qty,
             craft_time=craft_time,
         )
+
+
+def _seed_mining_recipes() -> None:
+    """
+    Add mining / extraction recipes (no belt input, pure producers).
+
+    Rates (normal purity, 100% clock):
+      Miner Mk.1 : 60 /min  (qty=1, craft_time=1s)
+      Miner Mk.2 : 120/min  (qty=2, craft_time=1s)
+      Miner Mk.3 : 240/min  (qty=4, craft_time=1s)
+      Water Extractor : 120 m3/min
+      Oil Extractor   :  60 m3/min
+    """
+    from .db import get_connection
+    conn = get_connection()
+
+    def mat(name: str) -> int:
+        row = conn.execute("SELECT id FROM Materials WHERE name = ?", (name,)).fetchone()
+        return row["id"]
+
+    def mach(name: str) -> int:
+        row = conn.execute("SELECT id FROM Machines WHERE name = ?", (name,)).fetchone()
+        return row["id"]
+
+    solid_ores = [
+        "Iron Ore", "Copper Ore", "Limestone", "Coal", "Raw Quartz", "Caterium Ore"
+    ]
+    miners = [
+        ("Miner Mk.1", 1, 1.0),   # out_qty, craft_time -> 60/min
+        ("Miner Mk.2", 2, 1.0),   # -> 120/min
+        ("Miner Mk.3", 4, 1.0),   # -> 240/min
+    ]
+
+    for ore in solid_ores:
+        ore_id = mat(ore)
+        for machine_name, out_qty, craft_time in miners:
+            add_recipe(
+                name=f"Mine {ore} ({machine_name})",
+                machine_id=mach(machine_name),
+                input_material_id=None,
+                input_qty=0,
+                output_material_id=ore_id,
+                output_qty=out_qty,
+                craft_time=craft_time,
+            )
+
+    # Water Extractor: 120 m3/min (qty=2, ct=1s)
+    add_recipe(
+        name="Extract Water",
+        machine_id=mach("Water Extractor"),
+        input_material_id=None,
+        input_qty=0,
+        output_material_id=mat("Water"),
+        output_qty=2,
+        craft_time=1.0,
+    )
+
+    # Oil Extractor: 60 m3/min (qty=1, ct=1s)
+    add_recipe(
+        name="Extract Crude Oil",
+        machine_id=mach("Oil Extractor"),
+        input_material_id=None,
+        input_qty=0,
+        output_material_id=mat("Crude Oil"),
+        output_qty=1,
+        craft_time=1.0,
+    )

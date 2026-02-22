@@ -137,7 +137,13 @@ def calculate_production(
 
         # items/min = (output_qty / craft_time) * 60 * clock_speed
         output_rate = (recipe["output_qty"] / craft_time) * 60.0 * clock_speed
-        input_rate  = (recipe["input_qty"]  / craft_time) * 60.0 * clock_speed
+
+        # Mining/extraction recipes have no belt input (input_qty == 0 or None)
+        raw_input_qty = recipe.get("input_qty") or 0
+        if raw_input_qty > 0 and recipe.get("input_material_id"):
+            input_rate = (raw_input_qty / craft_time) * 60.0 * clock_speed
+        else:
+            input_rate = 0.0   # miners are pure producers — no input required
 
         node_output_rate[node_id] = output_rate
         recipe_name = recipe["name"]

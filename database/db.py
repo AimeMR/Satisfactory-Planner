@@ -31,7 +31,7 @@ def close_connection() -> None:
 
 
 def initialize_db() -> None:
-    """Create all tables if they do not exist yet."""
+    """Create all tables if they do not exist yet, then run migrations."""
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -52,16 +52,17 @@ def initialize_db() -> None:
         outputs_allowed  INTEGER NOT NULL DEFAULT 1
     );
 
-    -- Production recipes (each row = one input → one output mapping)
+    -- Production recipes (each row = one input -> one output mapping)
+    -- input_material_id is NULL for miners/extractors (no belt input needed)
     CREATE TABLE IF NOT EXISTS Recipes (
         id                 INTEGER PRIMARY KEY AUTOINCREMENT,
         name               TEXT    NOT NULL,
         machine_id         INTEGER NOT NULL REFERENCES Machines(id),
-        input_material_id  INTEGER NOT NULL REFERENCES Materials(id),
-        input_qty          REAL    NOT NULL,
+        input_material_id  INTEGER          REFERENCES Materials(id),
+        input_qty          REAL    NOT NULL DEFAULT 0,
         output_material_id INTEGER NOT NULL REFERENCES Materials(id),
         output_qty         REAL    NOT NULL,
-        craft_time         REAL    NOT NULL DEFAULT 2.0  -- seconds per cycle
+        craft_time         REAL    NOT NULL DEFAULT 2.0
     );
 
     -- User-placed machine instances on the canvas
@@ -85,4 +86,80 @@ def initialize_db() -> None:
     """)
 
     conn.commit()
+    _migrate_recipes_nullable(conn)
     print("[DB] Tables created (or already exist).")
+
+
+def _migrate_recipes_nullable(conn: "sqlite3.Connection") -> None:
+    """
+    If the Recipes table still has a NOT NULL constraint on input_material_id
+    (old schema), rename-and-recreate it to allow NULL (for miners/extractors).
+    """
+    cols = conn.execute("PRAGMA table_info(Recipes)").fetchall()
+    needs_migration = any(
+        col["name"] == "input_material_id" and col["notnull"]
+        for col in cols
+    )
+    if not needs_migration:
+        return
+
+    print("[DB] Migrating schema to allow nullable inputs and fix foreign keys...")
+    conn.executescript("""
+        PRAGMA foreign_keys = OFF;
+
+        -- 1. Rename old tables
+        ALTER TABLE Connections RENAME TO _Connections_old;
+        ALTER TABLE Placed_Nodes RENAME TO _Placed_Nodes_old;
+        ALTER TABLE Recipes RENAME TO _Recipes_old;
+
+        -- 2. Create new tables with correct schema
+        CREATE TABLE Recipes (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            name               TEXT    NOT NULL,
+            machine_id         INTEGER NOT NULL REFERENCES Machines(id),
+            input_material_id  INTEGER          REFERENCES Materials(id),
+            input_qty          REAL    NOT NULL DEFAULT 0.0,
+            output_material_id INTEGER NOT NULL REFERENCES Materials(id),
+            output_qty         REAL    NOT NULL,
+            craft_time         REAL    NOT NULL DEFAULT 2.0
+        );
+
+        CREATE TABLE Placed_Nodes (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            machine_id    INTEGER NOT NULL REFERENCES Machines(id),
+            recipe_id     INTEGER          REFERENCES Recipes(id),
+            pos_x         REAL    NOT NULL DEFAULT 0,
+            pos_y         REAL    NOT NULL DEFAULT 0,
+            clock_speed   REAL    NOT NULL DEFAULT 1.0
+        );
+
+        CREATE TABLE Connections (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_node_id   INTEGER NOT NULL REFERENCES Placed_Nodes(id) ON DELETE CASCADE,
+            target_node_id   INTEGER NOT NULL REFERENCES Placed_Nodes(id) ON DELETE CASCADE,
+            material_id      INTEGER          REFERENCES Materials(id),
+            current_velocity REAL    NOT NULL DEFAULT 0
+        );
+
+        -- 3. Restore data
+        INSERT INTO Recipes (id, name, machine_id, input_material_id, input_qty, output_material_id, output_qty, craft_time)
+            SELECT id, name, machine_id, input_material_id, input_qty, output_material_id, output_qty, craft_time
+            FROM _Recipes_old;
+
+        INSERT INTO Placed_Nodes (id, machine_id, recipe_id, pos_x, pos_y, clock_speed)
+            SELECT id, machine_id, recipe_id, pos_x, pos_y, clock_speed
+            FROM _Placed_Nodes_old;
+
+        INSERT INTO Connections (id, source_node_id, target_node_id, material_id, current_velocity)
+            SELECT id, source_node_id, target_node_id, material_id, current_velocity
+            FROM _Connections_old;
+
+        -- 4. Clean up
+        DROP TABLE _Connections_old;
+        DROP TABLE _Placed_Nodes_old;
+        DROP TABLE _Recipes_old;
+
+        PRAGMA foreign_keys = ON;
+    """)
+    conn.commit()
+    print("[DB] Migration complete.")

@@ -49,8 +49,10 @@ _HEADER_ALPHA     = 200          # header strip alpha
 _BODY_ALPHA       = 180
 
 NODE_W = 230
-NODE_H = 120
+NODE_H = 148
 CORNER = 10
+# Body starts below the header
+_BODY_Y = 36
 
 
 class MachineNode(QGraphicsItem):
@@ -123,9 +125,11 @@ class MachineNode(QGraphicsItem):
         ports = []
         if count == 0:
             return ports
-        spacing = NODE_H / (count + 1)
+        # Position ports in the body area (below the header strip)
+        body_h = NODE_H - _BODY_Y
+        spacing = body_h / (count + 1)
         for i in range(count):
-            y = spacing * (i + 1)
+            y = _BODY_Y + spacing * (i + 1)
             port = PortItem(ptype, self, self)
             port.setPos(x, y)
             ports.append(port)
@@ -154,7 +158,7 @@ class MachineNode(QGraphicsItem):
                 border: 1px solid #4a4a8a;
                 border-radius: 4px;
                 padding: 2px 6px;
-                font-size: 11px;
+                font-size: 10px;
             }
             QComboBox QAbstractItemView {
                 background: #16213e;
@@ -166,8 +170,8 @@ class MachineNode(QGraphicsItem):
 
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(combo)
-        proxy.setPos(10, 52)
-        proxy.resize(NODE_W - 20, 28)
+        proxy.setPos(10, 44)
+        proxy.resize(NODE_W - 20, 25)
 
         self._combo = combo
         self._proxy = proxy
@@ -205,7 +209,7 @@ class MachineNode(QGraphicsItem):
 
         rect = QRectF(0, 0, NODE_W, NODE_H)
 
-        # ── Body gradient ──────────────────────────────────────────────
+        # ── Body gradient ────────────────────────────────────────────────────────
         grad = QLinearGradient(0, 0, 0, NODE_H)
         c1 = QColor(self._color_base); c1.setAlpha(_BODY_ALPHA)
         c2 = QColor(self._color_base).darker(160); c2.setAlpha(_BODY_ALPHA)
@@ -225,16 +229,15 @@ class MachineNode(QGraphicsItem):
         painter.setPen(QPen(border_color, pen_width))
         painter.drawRoundedRect(rect, CORNER, CORNER)
 
-        # ── Header strip ───────────────────────────────────────────────
+        # ── Header strip ───────────────────────────────────────────────────────────
         header_rect = QRectF(0, 0, NODE_W, 36)
         hc = QColor(self._color_header); hc.setAlpha(_HEADER_ALPHA)
         painter.setBrush(QBrush(hc))
         painter.setPen(Qt.NoPen)
         painter.drawRoundedRect(header_rect, CORNER, CORNER)
-        # Fill bottom corners of header (so body joins cleanly)
-        painter.drawRect(QRectF(0, 26, NODE_W, 10))
+        painter.drawRect(QRectF(0, 26, NODE_W, 10))   # fill bottom corners
 
-        # ── Machine name ───────────────────────────────────────────────
+        # ── Machine name ───────────────────────────────────────────────────────────
         painter.setPen(QPen(QColor("#ffffff")))
         name_font = QFont("Segoe UI", 10, QFont.Bold)
         painter.setFont(name_font)
@@ -242,17 +245,37 @@ class MachineNode(QGraphicsItem):
                          Qt.AlignVCenter | Qt.AlignLeft,
                          self.machine_data["name"])
 
-        # ── Rate label (below combo) ────────────────────────────────────
+        # ── Stats below the combo ───────────────────────────────────────────────
         if self._status != "no_recipe":
-            rate_font = QFont("Segoe UI", 9)
-            painter.setFont(rate_font)
-            rate_color = QColor("#aaffaa") if self._status == "ok" else QColor("#ffaaaa")
-            painter.setPen(QPen(rate_color))
-            label = f"{self._output_rate:.1f} items/min"
-            painter.drawText(QRectF(14, 86, NODE_W - 28, 20),
-                             Qt.AlignVCenter | Qt.AlignLeft, label)
+            stat_font = QFont("Segoe UI", 9)
+            painter.setFont(stat_font)
 
-        # ── Port labels ────────────────────────────────────────────────
+            y = 84   # first stat line (below proxy at y=44+25=69 + gap)
+
+            # Output velocity
+            out_color = QColor("#aaffaa") if self._status == "ok" else QColor("#ffaaaa")
+            painter.setPen(QPen(out_color))
+            painter.drawText(QRectF(14, y, NODE_W - 28, 16),
+                             Qt.AlignVCenter | Qt.AlignLeft,
+                             f"OUT: {self._output_rate:.1f} items/min")
+
+            # Input consumption (skip for pure producers like miners)
+            if self._input_rate > 0:
+                y += 16
+                painter.setPen(QPen(QColor("#aaddff")))
+                painter.drawText(QRectF(14, y, NODE_W - 28, 16),
+                                 Qt.AlignVCenter | Qt.AlignLeft,
+                                 f" IN: {self._input_rate:.1f} items/min")
+
+            # Energy
+            y += 16
+            energy_mw = self._calc_energy_mw()
+            painter.setPen(QPen(QColor("#ffd54f")))
+            painter.drawText(QRectF(14, y, NODE_W - 28, 16),
+                             Qt.AlignVCenter | Qt.AlignLeft,
+                             f" [E]: {energy_mw:.1f} MW")
+
+        # ── Port labels ───────────────────────────────────────────────────────────────
         port_font = QFont("Segoe UI", 8)
         painter.setFont(port_font)
         for port in self.input_ports:
@@ -317,6 +340,12 @@ class MachineNode(QGraphicsItem):
         self._input_rate  = result.input_rate_required
         self._status      = result.status
         self.update()   # trigger repaint
+
+    def _calc_energy_mw(self) -> float:
+        """Energy consumption in MW using Satisfactory's overclocking formula."""
+        base = self.machine_data.get("base_power", 0.0)
+        # Formula: P = P_base * clock_speed ^ 1.321
+        return base * (self.clock_speed ** 1.321)
 
     # ------------------------------------------------------------------
     # DB serialisation helper

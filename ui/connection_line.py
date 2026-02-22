@@ -48,10 +48,11 @@ class ConnectionLine(QGraphicsPathItem):
         self.material_id = material_id
 
         # Runtime result from engine
-        self._flow_rate:   float = 0.0
-        self._mat_name:    str   = ""
-        self._status:      str   = "ok"
-        self._mat_type:    str   = "solid"   # "solid" | "liquid" | "gas"
+        self._flow_rate:         float = 0.0
+        self._mat_name:          str   = ""
+        self._status:            str   = "ok"
+        self._mat_type:          str   = "solid"   # "solid" | "liquid" | "gas"
+        self._material_mismatch: bool  = False      # source output != target input
 
         # Fetch material type for colour
         if material_id is not None:
@@ -106,6 +107,9 @@ class ConnectionLine(QGraphicsPathItem):
         self._update_label()
 
     def _line_color(self) -> QColor:
+        # Priority: mismatch (bright red) > deficit (dark red dashed) > type-based colour
+        if self._material_mismatch:
+            return QColor("#ff1744")   # vivid red — wrong material
         if self._status == "deficit":
             return QColor("#f44336")
         if self._mat_type in ("liquid", "gas"):
@@ -113,8 +117,13 @@ class ConnectionLine(QGraphicsPathItem):
         return _BELT_COLOR
 
     def _update_label(self) -> None:
-        if self._mat_name:
+        if self._material_mismatch:
+            # Show what the source produces vs what target expects
+            text = "MATERIAL MISMATCH"
+            self._label.setDefaultTextColor(QColor("#ff1744"))
+        elif self._mat_name:
             text = f"{self._mat_name}  {self._flow_rate:.1f}/min"
+            self._label.setDefaultTextColor(QColor("#ffffff"))
         else:
             text = ""
         self._label.setPlainText(text)
@@ -165,6 +174,12 @@ class ConnectionLine(QGraphicsPathItem):
         if result.material_name:
             self._mat_name = result.material_name
         self.update_path()
+
+    def set_mismatch(self, mismatch: bool) -> None:
+        """Called by FactoryScene.recalculate() to flag material incompatibility."""
+        if self._material_mismatch != mismatch:
+            self._material_mismatch = mismatch
+            self.update_path()   # repaint with new colour + label
 
     # ------------------------------------------------------------------
     # DB serialisation
