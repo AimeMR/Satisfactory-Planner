@@ -107,23 +107,32 @@ class ConnectionLine(QGraphicsPathItem):
         self._update_label()
 
     def _line_color(self) -> QColor:
-        # Priority: mismatch (bright red) > deficit (dark red dashed) > type-based colour
+        # Status-based coloring as requested:
+        # Red: Mismatch | Orange: Deficit | Blue: Surplus | Green: Perfect
         if self._material_mismatch:
             return QColor("#ff1744")   # vivid red — wrong material
+        
         if self._status == "deficit":
-            return QColor("#f44336")
-        if self._mat_type in ("liquid", "gas"):
-            return _PIPE_COLOR
-        return _BELT_COLOR
+            return QColor("#ff9800")   # orange — less than needed
+        elif self._status == "surplus":
+            return QColor("#2196f3")   # blue — excess material
+        elif self._status == "ok" and self._flow_rate > 0:
+            return QColor("#4caf50")   # green — perfect quantity
+        
+        # Idle/Default
+        return QColor("#555577")
 
     def _update_label(self) -> None:
         if self._material_mismatch:
-            # Show what the source produces vs what target expects
             text = "MATERIAL MISMATCH"
             self._label.setDefaultTextColor(QColor("#ff1744"))
         elif self._mat_name:
             text = f"{self._mat_name}  {self._flow_rate:.1f}/min"
-            self._label.setDefaultTextColor(QColor("#ffffff"))
+            # Match text color to line color
+            color = self._line_color()
+            if color.toHsl().lightness() < 128:
+                color = color.lighter(150)
+            self._label.setDefaultTextColor(color)
         else:
             text = ""
         self._label.setPlainText(text)

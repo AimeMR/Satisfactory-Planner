@@ -158,11 +158,18 @@ def calculate_production(
         )
 
     # --- Compute per-connection flow and status ---
+    # Count outgoing connections per source node to split flow
+    out_counts = {nid: len(adj) for nid, adj in graph["adjacency"].items()}
+
     for conn_id, conn in graph["connections"].items():
         src_id = conn["source_node_id"]
         tgt_id = conn["target_node_id"]
 
-        src_rate    = node_output_rate.get(src_id, 0.0)
+        # Split source production among all outgoing connections
+        total_src_rate = node_output_rate.get(src_id, 0.0)
+        num_conns      = out_counts.get(src_id, 1)
+        src_rate       = total_src_rate / num_conns if num_conns > 0 else 0.0
+
         tgt_node_r  = result.nodes.get(tgt_id)
         demand      = tgt_node_r.input_rate_required if tgt_node_r else 0.0
 
@@ -182,7 +189,7 @@ def calculate_production(
             target_node_id=tgt_id,
             material_name=mat_name,
             flow_rate=round(src_rate, 4),
-            capacity=round(src_rate, 4),
+            capacity=round(total_src_rate, 4),
             status=status,
         )
 

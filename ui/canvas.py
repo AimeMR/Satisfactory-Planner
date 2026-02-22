@@ -20,7 +20,7 @@ from PySide6.QtGui     import (
 # Colour palette (Satisfactory dark-amber theme)
 # ---------------------------------------------------------------------------
 BG_COLOR   = QColor("#1a1a2e")   # deep navy
-GRID_COLOR = QColor("#2a2a4a")   # subtle purple-grey dots
+GRID_COLOR = QColor("#44446a")   # more intense grid dots
 
 
 class FactoryScene(QGraphicsScene):
@@ -254,6 +254,26 @@ class FactoryView(QGraphicsView):
     # Zoom
     # ------------------------------------------------------------------
     def wheelEvent(self, event: QWheelEvent) -> None:
+        # Only block zoom if the mouse is over an OPEN dropdown list.
+        # If it's closed, we should zoom normally.
+        item = self.itemAt(event.position().toPoint())
+        from PySide6.QtWidgets import QGraphicsProxyWidget, QComboBox
+        
+        target_combo = None
+        if isinstance(item, QGraphicsProxyWidget):
+            widget = item.widget()
+            if isinstance(widget, QComboBox):
+                target_combo = widget
+        elif item and item.parentItem() and isinstance(item.parentItem(), QGraphicsProxyWidget):
+            widget = item.parentItem().widget()
+            if isinstance(widget, QComboBox):
+                target_combo = widget
+
+        if target_combo and target_combo.view().isVisible():
+            # Dropdown is open, let standard scroll handle the list
+            super().wheelEvent(event)
+            return
+
         # Zoom on Ctrl+wheel OR plain wheel (no modifier)
         delta = event.angleDelta().y()
         if delta > 0:

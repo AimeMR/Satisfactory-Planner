@@ -172,6 +172,7 @@ class MachineNode(QGraphicsItem):
         proxy.setWidget(combo)
         proxy.setPos(10, 44)
         proxy.resize(NODE_W - 20, 25)
+        proxy.setZValue(100)  # Always stay on top for the dropdown
 
         self._combo = combo
         self._proxy = proxy
