@@ -77,7 +77,7 @@ class MainWindow(QMainWindow):
         self._status = QStatusBar()
         self._status.setStyleSheet(f"background:{_SIDEBAR_BG}; color:{_TEXT}; font-size:12px;")
         self.setStatusBar(self._status)
-        self._status.showMessage("Ready — middle-drag to pan, scroll to zoom, double-click a machine to place")
+        self._status.showMessage("Ready — right-drag to pan, scroll to zoom, double-click a machine to place")
 
         # Load any persisted layout from DB
         self._load_layout()

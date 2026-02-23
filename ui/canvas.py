@@ -406,7 +406,7 @@ class FactoryView(QGraphicsView):
     # Pan (middle mouse button)
     # ------------------------------------------------------------------
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MiddleButton:
+        if event.button() in (Qt.MiddleButton, Qt.RightButton):
             self._pan_active = True
             self._pan_start  = event.position()
             self.setCursor(Qt.ClosedHandCursor)
@@ -429,7 +429,7 @@ class FactoryView(QGraphicsView):
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MiddleButton:
+        if event.button() in (Qt.MiddleButton, Qt.RightButton):
             self._pan_active = False
             self.setCursor(Qt.ArrowCursor)
             event.accept()
