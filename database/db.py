@@ -35,19 +35,20 @@ def initialize_db() -> None:
     conn = get_connection()
     cursor = conn.cursor()
 
-    # Breaking Change Migration: If the old Recipes table exists with input_material_id column,
-    # we wipe the DB to cleanly move to the multi-input schema and avoid FK crashes.
     try:
-        cursor.execute("SELECT input_material_id FROM Recipes LIMIT 1")
-        print("[DB] Old schema detected. Wiping database for breaking multi-input refactor...")
-        wipe_needed = True
+        cursor.execute("SELECT * FROM Settings LIMIT 1")
     except sqlite3.OperationalError:
-        try:
-            cursor.execute("SELECT source_port_idx FROM Connections LIMIT 1")
-            wipe_needed = False
-        except sqlite3.OperationalError:
-            print("[DB] Port index schema missing. Wiping database...")
-            wipe_needed = True
+        # Just create the table if it's missing, no need to wipe entire DB
+        # unless it's a major breaking change.
+        cursor.execute("CREATE TABLE IF NOT EXISTS Settings (key TEXT PRIMARY KEY, value TEXT)")
+        conn.commit()
+
+    try:
+        cursor.execute("SELECT category FROM Machines LIMIT 1")
+        wipe_needed = False
+    except sqlite3.OperationalError:
+        print("[DB] Machine category schema missing. Wiping database...")
+        wipe_needed = True
 
     if wipe_needed:
         global _connection
@@ -79,10 +80,17 @@ def initialize_db() -> None:
         type    TEXT    NOT NULL CHECK(type IN ('solid', 'liquid', 'gas'))
     );
 
+    -- User preferences (Line style, sidebar visibility, etc.)
+    CREATE TABLE IF NOT EXISTS Settings (
+        key    TEXT PRIMARY KEY,
+        value  TEXT
+    );
+
     -- Base machine blueprints (Smelter, Constructor, etc.)
     CREATE TABLE IF NOT EXISTS Machines (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
         name             TEXT    NOT NULL UNIQUE,
+        category         TEXT    NOT NULL DEFAULT 'Other',
         base_power       REAL    NOT NULL DEFAULT 0,
         inputs_allowed   INTEGER NOT NULL DEFAULT 1,
         outputs_allowed  INTEGER NOT NULL DEFAULT 1

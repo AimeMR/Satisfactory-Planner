@@ -6,8 +6,8 @@ Phase 2 — Application shell: sidebar + canvas + status bar.
 from __future__ import annotations
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-    QListWidget, QListWidgetItem, QLabel, QSplitter,
-    QStatusBar, QFrame, QComboBox,
+    QTreeWidget, QTreeWidgetItem, QLabel, QSplitter,
+    QStatusBar, QFrame, QComboBox, QPushButton,
 )
 from PySide6.QtCore    import Qt, QPointF
 from PySide6.QtGui     import QColor, QFont, QIcon
@@ -112,10 +112,36 @@ class MainWindow(QMainWindow):
         """)
         
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(20, 0, 20, 0)
+        layout.setContentsMargins(10, 0, 20, 0)
         layout.setSpacing(15)
+
+        # Sidebar Toggle Button
+        self.toggle_btn = QPushButton("☰ SIDEBAR")
+        self.toggle_btn.setFixedWidth(100)
+        self.toggle_btn.setCheckable(True)
+        self.toggle_btn.setChecked(True)
+        self.toggle_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {_SIDEBAR_ITEM};
+                border: 1px solid {_BORDER};
+                border-radius: 4px;
+                padding: 5px;
+                color: {_ACCENT};
+                font-weight: bold;
+                font-size: 11px;
+            }}
+            QPushButton:checked {{
+                background: {_ACCENT};
+                color: {_SIDEBAR_BG};
+            }}
+            QPushButton:hover {{
+                border-color: {_ACCENT};
+            }}
+        """)
+        self.toggle_btn.clicked.connect(self._toggle_sidebar)
+        layout.addWidget(self.toggle_btn)
         
-        # Title/Logo area
+        # Title area
         title = QLabel("SATISFACTORY PLANNER")
         title.setStyleSheet(f"color: {_ACCENT}; font-weight: bold; font-size: 14px; letter-spacing: 1px;")
         layout.addWidget(title)
@@ -155,6 +181,18 @@ class MainWindow(QMainWindow):
         style = style_map.get(index, "rounded")
         self.scene.set_line_style(style)
         self._update_status()
+        
+        # PERSIST SETTING
+        from database.crud import set_setting
+        set_setting("line_style", style)
+
+    def _toggle_sidebar(self, checked: bool) -> None:
+        self._sidebar.setVisible(checked)
+        self._status.showMessage(f"Sidebar {'shown' if checked else 'hidden'}", 2000)
+        
+        # PERSIST SETTING
+        from database.crud import set_setting
+        set_setting("sidebar_visible", "true" if checked else "false")
 
     def _build_sidebar(self) -> QWidget:
         container = QWidget()
@@ -179,30 +217,34 @@ class MainWindow(QMainWindow):
         """)
         layout.addWidget(header)
 
-        # Machine list
-        self._machine_list = QListWidget()
-        self._machine_list.setStyleSheet(f"""
-            QListWidget {{
+        # Machine list (Tree)
+        self._machine_tree = QTreeWidget()
+        self._machine_tree.setHeaderHidden(True)
+        self._machine_tree.setIndentation(20)
+        self._machine_tree.setStyleSheet(f"""
+            QTreeWidget {{
                 background: {_SIDEBAR_BG};
                 border: none;
                 outline: none;
                 color: {_TEXT};
                 font-size: 13px;
             }}
-            QListWidget::item {{
-                padding: 10px 14px;
-                border-bottom: 1px solid {_BORDER};
+            QTreeWidget::item {{
+                padding: 6px 10px;
+                border-bottom: 1px solid #222;
             }}
-            QListWidget::item:selected {{
+            QTreeWidget::item:selected {{
                 background: {_SIDEBAR_ITEM};
                 color: white;
             }}
-            QListWidget::item:hover {{
+            QTreeWidget::item:hover {{
                 background: #1a2a5e;
             }}
         """)
-        self._machine_list.itemDoubleClicked.connect(self._on_machine_dblclick)
-        layout.addWidget(self._machine_list)
+        self._machine_tree.itemDoubleClicked.connect(self._on_machine_dblclick)
+        self._machine_tree.itemExpanded.connect(self._on_tree_item_toggle)
+        self._machine_tree.itemCollapsed.connect(self._on_tree_item_toggle)
+        layout.addWidget(self._machine_tree)
 
         # Populate
         self._populate_machine_list()
@@ -216,21 +258,50 @@ class MainWindow(QMainWindow):
         return container
 
     def _populate_machine_list(self) -> None:
-        """Load machine types from DB and add to the sidebar list."""
+        """Load machine types from DB and group them by category in the Tree."""
         from database.crud import get_all_machines
         self._machines_data: dict[str, dict] = {}
-        for m in get_all_machines():
-            item = QListWidgetItem(f"  {m['name']}")
-            item.setData(Qt.UserRole, m)
-            self._machine_list.addItem(item)
-            self._machines_data[m["name"]] = m
+        machines = get_all_machines()
+
+        # Group machines by category
+        categories: dict[str, list] = {}
+        for m in machines:
+            cat = m.get("category", "Other")
+            if cat not in categories:
+                categories[cat] = []
+            categories[cat].append(m)
+
+        # Create Tree items
+        for cat_name in sorted(categories.keys()):
+            # Category Header
+            cat_item = QTreeWidgetItem(self._machine_tree)
+            cat_item.setText(0, cat_name.upper())
+            cat_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable) 
+            # Note: We need some flags to allow expansion but we handle non-selection in dblclick
+            cat_item.setForeground(0, QColor(_ACCENT))
+            cat_item.setFont(0, QFont("Segoe UI", 9, QFont.Bold))
+            cat_item.setData(0, Qt.UserRole + 1, cat_name) # Identifier for state lookup
+            
+            # Machine Items
+            for m in sorted(categories[cat_name], key=lambda x: x["name"]):
+                item = QTreeWidgetItem(cat_item)
+                item.setText(0, f"  {m['name']}")
+                item.setData(0, Qt.UserRole, m)
+                self._machines_data[m["name"]] = m
+            
+            # RESTORE EXPANSION STATE
+            from database.crud import get_setting
+            is_expanded = get_setting(f"cat_expanded_{cat_name}", "true") == "true"
+            cat_item.setExpanded(is_expanded)
 
     # ------------------------------------------------------------------
     # Double-click: place a new node at canvas centre
     # ------------------------------------------------------------------
-    def _on_machine_dblclick(self, item: QListWidgetItem) -> None:
+    def _on_machine_dblclick(self, item: QTreeWidgetItem, column: int) -> None:
         from ui.machine_node import MachineNode
-        machine_data = item.data(Qt.UserRole)
+        machine_data = item.data(0, Qt.UserRole)
+        if not machine_data:
+            return  # This was a category header or empty
 
         # Place node at the centre of the current view
         view_centre = self.view.mapToScene(
@@ -238,12 +309,20 @@ class MainWindow(QMainWindow):
         )
         # Small random offset so multiple placements don't exactly overlap
         import random
+        from PySide6.QtCore import QPointF
         offset = QPointF(random.randint(-40, 40), random.randint(-40, 40))
 
         node = MachineNode(machine_data, view_centre + offset, self.scene)
         self.scene.add_machine_node(node)
         self.scene.recalculate()
         self._update_status()
+
+    def _on_tree_item_toggle(self, item: QTreeWidgetItem) -> None:
+        """Save the expansion state of a category to DB."""
+        cat_name = item.data(0, Qt.UserRole + 1)
+        if cat_name:
+            from database.crud import set_setting
+            set_setting(f"cat_expanded_{cat_name}", "true" if item.isExpanded() else "false")
 
     # ------------------------------------------------------------------
     # Status bar
@@ -265,9 +344,20 @@ class MainWindow(QMainWindow):
         from database.crud import (
             get_all_placed_nodes, get_all_connections,
             get_machine_by_id, get_recipe_by_id, get_material_by_id,
+            get_setting,
         )
         from ui.machine_node import MachineNode
         from ui.connection_line import ConnectionLine
+
+        # 0. Load Configuration
+        saved_style = get_setting("line_style", "rounded")
+        style_to_idx = {"rounded": 0, "straight": 1, "orthogonal": 2}
+        self.style_combo.setCurrentIndex(style_to_idx.get(saved_style, 0))
+        # (The currentIndexChanged signal will trigger _on_style_changed and scene.set_line_style)
+        
+        is_visible = get_setting("sidebar_visible", "true") == "true"
+        self.toggle_btn.setChecked(is_visible)
+        self._sidebar.setVisible(is_visible)
 
         node_map: dict[int, object] = {}  # db_id → MachineNode
 

@@ -51,13 +51,13 @@ def get_machine_by_id(machine_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def add_machine(name: str, base_power: float,
+def add_machine(name: str, category: str, base_power: float,
                 inputs_allowed: int, outputs_allowed: int) -> int:
     conn = get_connection()
     cur = conn.execute(
-        "INSERT OR IGNORE INTO Machines (name, base_power, inputs_allowed, outputs_allowed) "
-        "VALUES (?, ?, ?, ?)",
-        (name, base_power, inputs_allowed, outputs_allowed),
+        "INSERT OR IGNORE INTO Machines (name, category, base_power, inputs_allowed, outputs_allowed) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (name, category, base_power, inputs_allowed, outputs_allowed),
     )
     conn.commit()
     if cur.lastrowid:
@@ -219,4 +219,20 @@ def update_connection_velocity(connection_id: int, velocity: float) -> None:
 def delete_connection(connection_id: int) -> None:
     conn = get_connection()
     conn.execute("DELETE FROM Connections WHERE id = ?", (connection_id,))
+    conn.commit()
+# ---------------------------------------------------------------------------
+# Global Settings (KV Store)
+# ---------------------------------------------------------------------------
+
+def get_setting(key: str, default: str | None = None) -> str | None:
+    row = get_connection().execute("SELECT value FROM Settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+def set_setting(key: str, value: str) -> None:
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO Settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, str(value))
+    )
     conn.commit()

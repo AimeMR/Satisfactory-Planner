@@ -68,26 +68,26 @@ def _seed_materials() -> None:
 
 
 def _seed_machines() -> None:
-    """Insert all base machine types."""
+    """Insert all base machine types with categories."""
     machines = [
-        # (name,               base_power, inputs, outputs)
-        ("Miner Mk.1",         5.0,   0, 1),
-        ("Miner Mk.2",        12.0,   0, 1),
-        ("Miner Mk.3",        30.0,   0, 1),
-        ("Water Extractor",   20.0,   0, 1),
-        ("Oil Extractor",     40.0,   0, 1),
-        ("Smelter",           12.0,   1, 1),
-        ("Foundry",           16.0,   2, 1),
-        ("Constructor",        4.0,   1, 1),
-        ("Assembler",         15.0,   2, 1),
-        ("Manufacturer",      55.0,   4, 1),
-        ("Refinery",          30.0,   2, 2),
-        ("Packager",          10.0,   2, 2),
-        ("Conveyor Splitter",  0.0,   1, 3),
-        ("Conveyor Merger",    0.0,   3, 1),
+        # (name,               category,     power, inputs, outputs)
+        ("Miner Mk.1",         "Extraction",  5.0,   0, 1),
+        ("Miner Mk.2",         "Extraction", 12.0,   0, 1),
+        ("Miner Mk.3",         "Extraction", 30.0,   0, 1),
+        ("Water Extractor",    "Extraction", 20.0,   0, 1),
+        ("Oil Extractor",      "Extraction", 40.0,   0, 1),
+        ("Smelter",            "Production", 12.0,   1, 1),
+        ("Foundry",            "Production", 16.0,   2, 1),
+        ("Constructor",        "Production",  4.0,   1, 1),
+        ("Assembler",          "Production", 15.0,   2, 1),
+        ("Manufacturer",       "Production", 55.0,   4, 1),
+        ("Refinery",           "Production", 30.0,   2, 2),
+        ("Packager",           "Production", 10.0,   2, 2),
+        ("Conveyor Splitter",  "Logistics",   0.0,   1, 3),
+        ("Conveyor Merger",    "Logistics",   0.0,   3, 1),
     ]
-    for name, power, inputs, outputs in machines:
-        add_machine(name, power, inputs, outputs)
+    for name, cat, power, inputs, outputs in machines:
+        add_machine(name, cat, power, inputs, outputs)
 
 
 def _seed_recipes() -> None:
