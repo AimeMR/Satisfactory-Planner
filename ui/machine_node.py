@@ -43,15 +43,16 @@ _MACHINE_COLORS: dict[str, str] = {
     "Miner Mk.3":       "#1a6a1a",
     "Water Extractor":  "#003a5c",
     "Oil Extractor":    "#3a1a00",
-    "Conveyor Splitter": "#5c3d1a",
-    "Conveyor Merger":   "#1a5c4d",
+    "Conveyor Splitter": "#ff6d00", # Vibrant Orange
+    "Conveyor Merger":   "#00e5ff", # Vibrant Cyan/Teal
 }
 _DEFAULT_COLOR    = "#2a2a4a"
 _HEADER_ALPHA     = 200          # header strip alpha
 _BODY_ALPHA       = 180
 
-NODE_W = 230
-NODE_H = 160
+# Default dimensions for standard machines
+_STD_W = 230
+_STD_H = 160
 CORNER = 10
 # Body starts below the header
 _BODY_Y = 36
@@ -85,6 +86,11 @@ class MachineNode(QGraphicsItem):
         self.current_recipe_id  = recipe_id
         self.clock_speed        = clock_speed
 
+        # Dimensions (Logistics are smaller)
+        self.is_logistics = "Splitter" in machine_data["name"] or "Merger" in machine_data["name"]
+        self.w = 120 if self.is_logistics else _STD_W
+        self.h = 120 if self.is_logistics else _STD_H
+
         # Runtime production result (filled by apply_result())
         self._output_rate: float = 0.0
         self._inputs: list[dict] = []
@@ -117,22 +123,47 @@ class MachineNode(QGraphicsItem):
     # Port construction
     # ------------------------------------------------------------------
     def _build_ports(self) -> None:
-        n_in  = self.machine_data.get("inputs_allowed",  1)
-        n_out = self.machine_data.get("outputs_allowed", 1)
+        name = self.machine_data["name"]
+        
+        if "Splitter" in name:
+            # 1 Input (Left: idx 0) -> 3 Outputs (Top: idx 0, Right: idx 1, Bottom: idx 2)
+            self.input_ports = [self._make_directional_port("in", QPointF(0, self.h/2), index=0)]
+            self.output_ports = [
+                self._make_directional_port("out", QPointF(self.w / 2, 0),      index=0), # Top
+                self._make_directional_port("out", QPointF(self.w, self.h / 2), index=1), # Right
+                self._make_directional_port("out", QPointF(self.w / 2, self.h), index=2), # Bottom
+            ]
+        elif "Merger" in name:
+            # 3 Inputs (Top: idx 0, Left: idx 1, Bottom: idx 2) -> 1 Output (Right: idx 0)
+            self.input_ports = [
+                self._make_directional_port("in", QPointF(self.w / 2, 0),      index=0), # Top
+                self._make_directional_port("in", QPointF(0, self.h / 2),      index=1), # Left
+                self._make_directional_port("in", QPointF(self.w / 2, self.h), index=2), # Bottom
+            ]
+            self.output_ports = [
+                self._make_directional_port("out", QPointF(self.w, self.h / 2), index=0), # Right
+            ]
+        else:
+            # Standard machines
+            n_in  = self.machine_data.get("inputs_allowed",  1)
+            n_out = self.machine_data.get("outputs_allowed", 1)
+            self.input_ports  = self._make_standard_ports("in",  n_in,  x=0)
+            self.output_ports = self._make_standard_ports("out", n_out, x=self.w)
 
-        self.input_ports  = self._make_ports("in",  n_in,  x=0)
-        self.output_ports = self._make_ports("out", n_out, x=NODE_W)
+    def _make_directional_port(self, ptype: str, pos: QPointF, index: int) -> PortItem:
+        port = PortItem(ptype, self, self, index=index)
+        port.setPos(pos)
+        return port
 
-    def _make_ports(self, ptype: str, count: int, x: float) -> list[PortItem]:
+    def _make_standard_ports(self, ptype: str, count: int, x: float) -> list[PortItem]:
         ports = []
         if count == 0:
             return ports
-        # Position ports in the body area (below the header strip)
-        body_h = NODE_H - _BODY_Y
+        body_h = self.h - _BODY_Y
         spacing = body_h / (count + 1)
         for i in range(count):
             y = _BODY_Y + spacing * (i + 1)
-            port = PortItem(ptype, self, self)
+            port = PortItem(ptype, self, self, index=i)
             port.setPos(x, y)
             ports.append(port)
         return ports
@@ -176,7 +207,7 @@ class MachineNode(QGraphicsItem):
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(combo)
         proxy.setPos(10, 44)
-        proxy.resize(NODE_W - 20, 25)
+        proxy.resize(self.w - 20, 25)
         proxy.setZValue(100)  # Always stay on top for the dropdown
 
         self._combo = combo
@@ -211,7 +242,7 @@ class MachineNode(QGraphicsItem):
     # Bounding rect (required by Qt)
     # ------------------------------------------------------------------
     def boundingRect(self) -> QRectF:
-        return QRectF(-2, -2, NODE_W + 4, NODE_H + 4)   # +2 for selection outline
+        return QRectF(-2, -2, self.w + 4, self.h + 4)   # +2 for selection outline
 
     # ------------------------------------------------------------------
     # Paint
@@ -219,10 +250,10 @@ class MachineNode(QGraphicsItem):
     def paint(self, painter: QPainter, option, widget=None) -> None:
         painter.setRenderHint(QPainter.Antialiasing)
 
-        rect = QRectF(0, 0, NODE_W, NODE_H)
+        rect = QRectF(0, 0, self.w, self.h)
 
         # ── Body gradient ────────────────────────────────────────────────────────
-        grad = QLinearGradient(0, 0, 0, NODE_H)
+        grad = QLinearGradient(0, 0, 0, self.h)
         c1 = QColor(self._color_base); c1.setAlpha(_BODY_ALPHA)
         c2 = QColor(self._color_base).darker(160); c2.setAlpha(_BODY_ALPHA)
         grad.setColorAt(0, c1)
@@ -242,72 +273,74 @@ class MachineNode(QGraphicsItem):
         painter.drawRoundedRect(rect, CORNER, CORNER)
 
         # ── Header strip ───────────────────────────────────────────────────────────
-        header_rect = QRectF(0, 0, NODE_W, 36)
+        header_h = 24 if self.is_logistics else 36
+        header_rect = QRectF(0, 0, self.w, header_h)
         hc = QColor(self._color_header); hc.setAlpha(_HEADER_ALPHA)
         painter.setBrush(QBrush(hc))
         painter.setPen(Qt.NoPen)
         painter.drawRoundedRect(header_rect, CORNER, CORNER)
-        painter.drawRect(QRectF(0, 26, NODE_W, 10))   # fill bottom corners
+        painter.drawRect(QRectF(0, header_h - 10, self.w, 10))   # fill bottom corners
 
         # ── Machine name ───────────────────────────────────────────────────────────
         painter.setPen(QPen(QColor("#ffffff")))
-        name_font = QFont("Segoe UI", 10, QFont.Bold)
+        font_size = 9 if self.is_logistics else 10
+        name_font = QFont("Segoe UI", font_size, QFont.Bold)
         painter.setFont(name_font)
-        painter.drawText(QRectF(14, 6, NODE_W - 28, 24),
+        painter.drawText(QRectF(10, 0, self.w - 20, header_h),
                          Qt.AlignVCenter | Qt.AlignLeft,
-                         self.machine_data["name"])
+                         self.machine_data["name"].replace("Conveyor ", ""))
 
-        # ── Stats below the combo ───────────────────────────────────────────────
-        if self._status != "no_recipe" or "Splitter" in self.machine_data["name"] or "Merger" in self.machine_data["name"]:
+        # ── Stats ───────────────────────────────────────────────────────────────
+        if self._status != "no_recipe" or self.is_logistics:
             stat_font = QFont("Segoe UI", 9)
             painter.setFont(stat_font)
 
-            is_logistics = "Splitter" in self.machine_data["name"] or "Merger" in self.machine_data["name"]
-            y = 48 if is_logistics else 84   # move up if no combo proxy
+            y = header_h + 8 if self.is_logistics else 84
 
 
             # Output velocity
             out_color = QColor("#aaffaa") if self._status == "ok" else QColor("#ffaaaa")
             painter.setPen(QPen(out_color))
-            painter.drawText(QRectF(14, y, NODE_W - 28, 16),
+            painter.drawText(QRectF(10, y, self.w - 20, 16),
                              Qt.AlignVCenter | Qt.AlignLeft,
-                             f"OUT: {self._output_rate:.1f} items/min")
+                             f"OUT: {self._output_rate:.1f}/m")
 
             # Energy
             y += 16
             energy_mw = self._calc_energy_mw()
             painter.setPen(QPen(QColor("#ffd54f")))
-            painter.drawText(QRectF(14, y, NODE_W - 28, 16),
+            painter.drawText(QRectF(10, y, self.w - 20, 16),
                              Qt.AlignVCenter | Qt.AlignLeft,
-                             f" [E]: {energy_mw:.1f} MW")
+                             f"⚡ {energy_mw:.1f} MW")
 
             # ── Inputs Section (with separator line) ─────────────────────
             if self._inputs:
                 y += 20
                 painter.setPen(QPen(QColor("#44446a"), 1))
-                painter.drawLine(14, y, NODE_W - 14, y)
+                painter.drawLine(10, y, self.w - 10, y)
                 y += 6
                 
                 inp_font = QFont("Segoe UI", 8)
                 painter.setFont(inp_font)
                 painter.setPen(QPen(QColor("#aaddff")))
                 for inp in self._inputs:
-                    painter.drawText(QRectF(14, y, NODE_W - 28, 14),
+                    painter.drawText(QRectF(10, y, self.w - 20, 14),
                                      Qt.AlignVCenter | Qt.AlignLeft,
                                      f"► {inp['rate']:.1f} {inp['material']}")
                     y += 14
 
-        # ── Port labels ───────────────────────────────────────────────────────────────
-        port_font = QFont("Segoe UI", 8)
-        painter.setFont(port_font)
-        for port in self.input_ports:
-            painter.setPen(QPen(QColor("#4a90d9")))
-            painter.drawText(QRectF(8, port.pos().y() - 8, 40, 16),
-                             Qt.AlignVCenter | Qt.AlignLeft, "IN")
-        for port in self.output_ports:
-            painter.setPen(QPen(QColor("#e87722")))
-            painter.drawText(QRectF(NODE_W - 48, port.pos().y() - 8, 40, 16),
-                             Qt.AlignVCenter | Qt.AlignRight, "OUT")
+        # ── Port labels (Hide IN/OUT if logistics to keep it clean) ──────
+        if not self.is_logistics:
+            port_font = QFont("Segoe UI", 8)
+            painter.setFont(port_font)
+            for port in self.input_ports:
+                painter.setPen(QPen(QColor("#4a90d9")))
+                painter.drawText(QRectF(8, port.pos().y() - 8, 40, 16),
+                                 Qt.AlignVCenter | Qt.AlignLeft, "IN")
+            for port in self.output_ports:
+                painter.setPen(QPen(QColor("#e87722")))
+                painter.drawText(QRectF(self.w - 48, port.pos().y() - 8, 40, 16),
+                                 Qt.AlignVCenter | Qt.AlignRight, "OUT")
 
     # ------------------------------------------------------------------
     # Context menu (right-click)

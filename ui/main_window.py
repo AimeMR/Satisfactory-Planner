@@ -220,9 +220,13 @@ class MainWindow(QMainWindow):
             src_node = node_map.get(row["source_node_id"])
             tgt_node = node_map.get(row["target_node_id"])
             if src_node and tgt_node:
-                # Find the matching ports
-                src_port = src_node.output_ports[0] if src_node.output_ports else None
-                tgt_port = tgt_node.input_ports[0]  if tgt_node.input_ports  else None
+                # Find the matching ports by index
+                s_idx = row.get("source_port_idx", 0)
+                t_idx = row.get("target_port_idx", 0)
+                
+                src_port = src_node.output_ports[s_idx] if s_idx < len(src_node.output_ports) else None
+                tgt_port = tgt_node.input_ports[t_idx]  if t_idx < len(tgt_node.input_ports)  else None
+                
                 if src_port and tgt_port:
                     line = ConnectionLine(src_port, tgt_port,
                                          db_id=row["id"],
@@ -271,6 +275,8 @@ class MainWindow(QMainWindow):
                 new_id = add_connection(
                     source_node_id=src_id,
                     target_node_id=tgt_id,
+                    source_port_idx=conn.src_port.index,
+                    target_port_idx=conn.tgt_port.index,
                     material_id=conn.material_id,
                 )
                 conn.conn_db_id = new_id

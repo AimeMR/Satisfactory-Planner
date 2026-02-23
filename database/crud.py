@@ -193,14 +193,15 @@ def get_connections_for_node(node_id: int) -> list[dict]:
 
 
 def add_connection(source_node_id: int, target_node_id: int,
+                   source_port_idx: int = 0, target_port_idx: int = 0,
                    material_id: int | None = None,
                    current_velocity: float = 0.0) -> int:
     conn = get_connection()
     cur = conn.execute(
         "INSERT INTO Connections "
-        "(source_node_id, target_node_id, material_id, current_velocity) "
-        "VALUES (?, ?, ?, ?)",
-        (source_node_id, target_node_id, material_id, current_velocity),
+        "(source_node_id, target_node_id, source_port_idx, target_port_idx, material_id, current_velocity) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (source_node_id, target_node_id, source_port_idx, target_port_idx, material_id, current_velocity),
     )
     conn.commit()
     return cur.lastrowid

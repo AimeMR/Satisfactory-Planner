@@ -115,8 +115,9 @@ def calculate_production(
     result = GraphResult()
 
     # --- Compute per-node output rates ---
-    node_output_rate: dict[int, float] = {}   # node_id → items/min produced
-
+    node_output_rate = {}  # node_id -> items/min
+    node_material_name = {} # node_id -> material name
+    
     for node_id, node in graph["nodes"].items():
         machine = machine_map.get(node["machine_id"])
         machine_name = machine["name"] if machine else "Unknown"
@@ -156,13 +157,20 @@ def calculate_production(
             else:
                 node_output_rate[node_id] += rate
 
+        if recipe:
+            node_material_name[node_id] = None
+            if "materials" in recipe:
+                outs = [m for m in recipe["materials"] if not m["is_input"]]
+                if outs:
+                    node_material_name[node_id] = outs[0]["material_name"]
+
         result.nodes[node_id] = NodeResult(
             node_id=node_id,
             machine_name=machine_name,
-            recipe_name=recipe["name"],
+            recipe_name=recipe["name"] if recipe else None,
             output_rate=round(node_output_rate[node_id], 4),
             inputs=input_list,
-            status="ok",
+            status="ok" if (recipe or is_logistics) else "no_recipe",
         )
 
     # --- Pass-through Flow Propagation (Logistics) ---
@@ -196,6 +204,21 @@ def calculate_production(
                 node_output_rate[nid] = acc_rate
                 result.nodes[nid].output_rate = round(acc_rate, 4)
                 changed = True
+        
+        # Propagate material name through logistics if target is empty but source has one
+        for conn_id, conn in graph["connections"].items():
+            src_id = conn["source_node_id"]
+            tgt_id = conn["target_node_id"]
+            tgt_node = graph["nodes"].get(tgt_id)
+            if tgt_node:
+                tgt_mach = machine_map.get(tgt_node["machine_id"])
+                if tgt_mach and ("Merger" in tgt_mach["name"] or "Splitter" in tgt_mach["name"]):
+                    # Inherit material from source if available
+                    src_mat = node_material_name.get(src_id)
+                    if src_mat and node_material_name.get(tgt_id) != src_mat:
+                        node_material_name[tgt_id] = src_mat
+                        changed = True
+
         if not changed: break
 
     # --- Compute final per-connection results ---
@@ -229,9 +252,8 @@ def calculate_production(
                     if outputs:
                         mat_name = outputs[0]["material_name"]
             elif src_nr and ("Merger" in src_nr.machine_name or "Splitter" in src_nr.machine_name):
-                # Logistics nodes don't have recipes, but we could propagate name too... 
-                # (For now, let's keep it simple: if no explicit mat, use source recipe)
-                pass
+                # Inherit from logistics node's propagated material
+                mat_name = node_material_name.get(src_id)
 
         # Find specific demand for this material at the target
         demand = 0.0

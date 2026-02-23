@@ -40,16 +40,36 @@ def initialize_db() -> None:
     try:
         cursor.execute("SELECT input_material_id FROM Recipes LIMIT 1")
         print("[DB] Old schema detected. Wiping database for breaking multi-input refactor...")
-        conn.close()
-        if os.path.exists(_DB_PATH):
-            os.remove(_DB_PATH)
-        # Re-initialize connection
+        wipe_needed = True
+    except sqlite3.OperationalError:
+        try:
+            cursor.execute("SELECT source_port_idx FROM Connections LIMIT 1")
+            wipe_needed = False
+        except sqlite3.OperationalError:
+            print("[DB] Port index schema missing. Wiping database...")
+            wipe_needed = True
+
+    if wipe_needed:
         global _connection
-        _connection = None
+        if _connection:
+            _connection.close()
+            _connection = None
+        
+        # Give Windows a moment to release the file lock
+        import time
+        time.sleep(0.5)
+        
+        try:
+            if os.path.exists(_DB_PATH):
+                os.remove(_DB_PATH)
+            print("[DB] Database wiped successfully.")
+        except PermissionError:
+            print("[DB] ERROR: Could not wipe database (file locked). Please close any other instances.")
+            # We continue anyway and let it fail on CREATE TABLE if it really didn't wipe
+        
+        # Re-initialize connection
         conn = get_connection()
         cursor = conn.cursor()
-    except sqlite3.OperationalError:
-        pass
 
     cursor.executescript("""
     -- All raw items and fluids in the game
@@ -100,6 +120,8 @@ def initialize_db() -> None:
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
         source_node_id   INTEGER NOT NULL REFERENCES Placed_Nodes(id) ON DELETE CASCADE,
         target_node_id   INTEGER NOT NULL REFERENCES Placed_Nodes(id) ON DELETE CASCADE,
+        source_port_idx  INTEGER NOT NULL DEFAULT 0,
+        target_port_idx  INTEGER NOT NULL DEFAULT 0,
         material_id      INTEGER          REFERENCES Materials(id),
         current_velocity REAL    NOT NULL DEFAULT 0
     );

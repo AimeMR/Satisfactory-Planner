@@ -25,6 +25,32 @@ _LABEL_BG    = QColor(0, 0, 0, 160)
 # Bezier control-point horizontal offset
 _CTRL_OFFSET = 100
 
+class ConnectionLabel(QGraphicsTextItem):
+    """
+    A text label with a semi-transparent 'pill' background for better readability.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setZValue(20)
+        self.setFont(QFont("Segoe UI", 8, QFont.Bold))
+
+    def boundingRect(self):
+        # Add some padding for the pill
+        r = super().boundingRect()
+        return QRectF(r.x() - 6, r.y() - 2, r.width() + 12, r.height() + 4)
+
+    def paint(self, painter, option, widget=None):
+        painter.setRenderHint(QPainter.Antialiasing)
+        # ── Draw Background Pill ──
+        rect = self.boundingRect()
+        painter.setBrush(QBrush(QColor(0, 0, 0, 190))) # Dark semi-transparent
+        painter.setPen(QPen(QColor(255, 255, 255, 40), 1)) # Subtle border
+        painter.drawRoundedRect(rect, 8, 8)
+        
+        # ── Draw Original Text ──
+        # We need to offset the painter slightly because we expanded the boundingRect
+        super().paint(painter, option, widget)
+
 
 class ConnectionLine(QGraphicsPathItem):
     """
@@ -59,9 +85,7 @@ class ConnectionLine(QGraphicsPathItem):
             self._load_material(material_id)
 
         # Label text item (child of this item)
-        self._label = QGraphicsTextItem(self)
-        self._label.setDefaultTextColor(QColor("#ffffff"))
-        self._label.setFont(QFont("Segoe UI", 8))
+        self._label = ConnectionLabel(self)
         self._label.setZValue(20)
 
         self.setZValue(0)   # below nodes
@@ -102,8 +126,9 @@ class ConnectionLine(QGraphicsPathItem):
 
         # Position label at the midpoint of the Bezier
         mid = path.pointAtPercent(0.5)
+        # Center horizontally, slightly above point
         self._label.setPos(mid.x() - self._label.boundingRect().width() / 2,
-                           mid.y() - 18)
+                           mid.y() - 12)
         self._update_label()
 
     def _line_color(self) -> QColor:
@@ -124,18 +149,16 @@ class ConnectionLine(QGraphicsPathItem):
 
     def _update_label(self) -> None:
         if self._material_mismatch:
-            text = "MATERIAL MISMATCH"
-            self._label.setDefaultTextColor(QColor("#ff1744"))
+            html = "<span style='color:#ff1744; font-weight:bold;'>! MATERIAL MISMATCH !</span>"
         elif self._mat_name:
-            text = f"{self._mat_name}  {self._flow_rate:.1f}/min"
-            # Match text color to line color
-            color = self._line_color()
-            if color.toHsl().lightness() < 128:
-                color = color.lighter(150)
-            self._label.setDefaultTextColor(color)
+            # White material name, Yellow rate
+            html = (f"<span style='color:#ffffff;'>{self._mat_name}</span> "
+                    f"<span style='color:#ffd54f;'>{self._flow_rate:.1f}/m</span>")
         else:
-            text = ""
-        self._label.setPlainText(text)
+            html = ""
+        
+        if self._label.toHtml() != html:
+            self._label.setHtml(html)
 
     # ------------------------------------------------------------------
     # Hover highlight
