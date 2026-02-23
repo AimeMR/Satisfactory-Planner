@@ -46,6 +46,10 @@ class MainWindow(QMainWindow):
         # Scene + view
         self.scene = FactoryScene()
         self.view  = FactoryView(self.scene)
+        
+        # Project State
+        from database.crud import get_setting
+        self.current_project_id = int(get_setting("current_project_id", "1"))
 
         # Sidebar
         self._sidebar = self._build_sidebar()
@@ -148,6 +152,93 @@ class MainWindow(QMainWindow):
         
         layout.addStretch()
         
+        # Project Selector
+        proj_label = QLabel("PROJECT:")
+        proj_label.setStyleSheet("color: #888; font-size: 11px; font-weight: bold;")
+        layout.addWidget(proj_label)
+        
+        self.project_combo = QComboBox()
+        self.project_combo.setFixedWidth(200)
+        self.project_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: {_SIDEBAR_ITEM};
+                border: 1px solid {_BORDER};
+                border-radius: 4px;
+                padding: 5px 10px;
+                color: {_ACCENT};
+                font-weight: bold;
+            }}
+        """)
+        self.project_combo.currentIndexChanged.connect(self._on_project_changed)
+        layout.addWidget(self.project_combo)
+        
+        self.new_proj_btn = QPushButton("+")
+        self.new_proj_btn.setFixedSize(30, 30)
+        self.new_proj_btn.setToolTip("New Project")
+        self.new_proj_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {_SIDEBAR_ITEM};
+                border: 1px solid {_BORDER};
+                border-radius: 4px;
+                color: white;
+                font-weight: bold;
+                font-size: 16px;
+            }}
+            QPushButton:hover {{ border-color: {_ACCENT}; color: {_ACCENT}; }}
+        """)
+        self.new_proj_btn.clicked.connect(self._on_new_project)
+        layout.addWidget(self.new_proj_btn)
+        
+        self.rename_proj_btn = QPushButton("✎")
+        self.rename_proj_btn.setFixedSize(30, 30)
+        self.rename_proj_btn.setToolTip("Rename Project")
+        self.rename_proj_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {_SIDEBAR_ITEM};
+                border: 1px solid {_BORDER};
+                border-radius: 4px;
+                color: white;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{ border-color: {_ACCENT}; color: {_ACCENT}; }}
+        """)
+        self.rename_proj_btn.clicked.connect(self._on_rename_project)
+        layout.addWidget(self.rename_proj_btn)
+
+        self.export_proj_btn = QPushButton("📤")
+        self.export_proj_btn.setFixedSize(30, 30)
+        self.export_proj_btn.setToolTip("Export Project to PC")
+        self.export_proj_btn.setStyleSheet(self.rename_proj_btn.styleSheet())
+        self.export_proj_btn.clicked.connect(self._on_export_project)
+        layout.addWidget(self.export_proj_btn)
+        
+        self.import_proj_btn = QPushButton("📥")
+        self.import_proj_btn.setFixedSize(30, 30)
+        self.import_proj_btn.setToolTip("Import Project from PC")
+        self.import_proj_btn.setStyleSheet(self.rename_proj_btn.styleSheet())
+        self.import_proj_btn.clicked.connect(self._on_import_project)
+        layout.addWidget(self.import_proj_btn)
+
+        self.delete_proj_btn = QPushButton("🗑️")
+        self.delete_proj_btn.setFixedSize(30, 30)
+        self.delete_proj_btn.setToolTip("Delete Current Project")
+        self.delete_proj_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {_SIDEBAR_ITEM};
+                border: 1px solid {_BORDER};
+                border-radius: 4px;
+                color: #ff5555;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{ border-color: #ff5555; background: #330000; }}
+        """)
+        self.delete_proj_btn.clicked.connect(self._on_delete_project)
+        layout.addWidget(self.delete_proj_btn)
+
+        self._populate_projects()
+
+        layout.addStretch()
+        
         # Line Style Dropdown
         style_label = QLabel("LINE STYLE:")
         style_label.setStyleSheet("color: #888; font-size: 11px; font-weight: bold;")
@@ -193,6 +284,138 @@ class MainWindow(QMainWindow):
         # PERSIST SETTING
         from database.crud import set_setting
         set_setting("sidebar_visible", "true" if checked else "false")
+
+    # ------------------------------------------------------------------
+    # Project Handlers
+    # ------------------------------------------------------------------
+    def _populate_projects(self) -> None:
+        """Load project list from DB into the combo box."""
+        from database.crud import get_all_projects
+        self.project_combo.blockSignals(True)
+        self.project_combo.clear()
+        
+        projects = get_all_projects()
+        for p in projects:
+            self.project_combo.addItem(p["name"], p["id"])
+            if p["id"] == self.current_project_id:
+                self.project_combo.setCurrentIndex(self.project_combo.count() - 1)
+        
+        if self.project_combo.count() == 0:
+            # Should not happen due to DB migration, but safety first
+            from database.crud import add_project
+            pid = add_project("Default Project")
+            self.project_combo.addItem("Default Project", pid)
+            self.current_project_id = pid
+            
+        self.project_combo.blockSignals(False)
+
+    def _on_project_changed(self, index: int) -> None:
+        if index < 0: return
+        pid = self.project_combo.currentData()
+        if pid == self.current_project_id: return
+        
+        # 1. SAVE current project before switching
+        self._save_layout()
+
+        # 2. Switch project
+        self.current_project_id = pid
+        from database.crud import set_setting
+        set_setting("current_project_id", str(pid))
+        
+        self.scene.clear()
+        self._load_layout()
+        self._update_status()
+        self._status.showMessage(f"Project switched to: {self.project_combo.currentText()}", 2000)
+
+    def _on_new_project(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "New Project", "Project Name:")
+        if ok and name.strip():
+            # Save current first
+            self._save_layout()
+            
+            from database.crud import add_project
+            pid = add_project(name.strip())
+            self.current_project_id = pid
+            from database.crud import set_setting
+            set_setting("current_project_id", str(pid))
+            
+            self._populate_projects()
+            self.scene.clear()
+            self._load_layout()
+            self._update_status()
+
+    def _on_rename_project(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        old_name = self.project_combo.currentText()
+        name, ok = QInputDialog.getText(self, "Rename Project", "New Name:", text=old_name)
+        if ok and name.strip() and name.strip() != old_name:
+            from database.crud import rename_project
+            rename_project(self.current_project_id, name.strip())
+            self._populate_projects()
+
+    def _on_export_project(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getSaveFileName(self, "Export Project", "", "Project Files (*.json)")
+        if path:
+            from database.io import export_project_to_json
+            if export_project_to_json(self.current_project_id, path):
+                self._status.showMessage(f"Project exported to {os.path.basename(path)}", 3000)
+            else:
+                self._status.showMessage("Export failed!", 3000)
+
+    def _on_import_project(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(self, "Import Project", "", "Project Files (*.json)")
+        if path:
+            # Save current first
+            self._save_layout()
+            
+            from database.io import import_project_from_json
+            new_id = import_project_from_json(path)
+            if new_id:
+                self.current_project_id = new_id
+                from database.crud import set_setting
+                set_setting("current_project_id", str(new_id))
+                self._populate_projects()
+                self.scene.clear()
+                self._load_layout()
+                self._update_status()
+                self._status.showMessage(f"Project imported from {os.path.basename(path)}", 3000)
+            else:
+                self._status.showMessage("Import failed!", 3000)
+
+    def _on_delete_project(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        proj_name = self.project_combo.currentText()
+        
+        reply = QMessageBox.question(
+            self, "Delete Project",
+            f"Are you sure you want to delete '{proj_name}'?\nThis will remove all nodes and connections permanently.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            from database.crud import delete_project
+            delete_project(self.current_project_id)
+            
+            # Switch to another project
+            from database.crud import get_all_projects
+            projects = get_all_projects()
+            if projects:
+                self.current_project_id = projects[0]["id"]
+            else:
+                from database.crud import add_project
+                self.current_project_id = add_project("Default Project")
+                
+            from database.crud import set_setting
+            set_setting("current_project_id", str(self.current_project_id))
+            
+            self._populate_projects()
+            self.scene.clear()
+            self._load_layout()
+            self._update_status()
+            self._status.showMessage(f"Project '{proj_name}' deleted.", 3000)
 
     def _build_sidebar(self) -> QWidget:
         container = QWidget()
@@ -312,7 +535,11 @@ class MainWindow(QMainWindow):
         from PySide6.QtCore import QPointF
         offset = QPointF(random.randint(-40, 40), random.randint(-40, 40))
 
-        node = MachineNode(machine_data, view_centre + offset, self.scene)
+        # Add to DB first to get an ID
+        from database.crud import add_placed_node
+        db_id = add_placed_node(self.current_project_id, machine_data["id"], pos_x=view_centre.x()+offset.x(), pos_y=view_centre.y()+offset.y())
+
+        node = MachineNode(machine_data, view_centre + offset, self.scene, db_id=db_id)
         self.scene.add_machine_node(node)
         self.scene.recalculate()
         self._update_status()
@@ -344,10 +571,13 @@ class MainWindow(QMainWindow):
         from database.crud import (
             get_all_placed_nodes, get_all_connections,
             get_machine_by_id, get_recipe_by_id, get_material_by_id,
-            get_setting,
+            get_setting, get_all_projects,
         )
         from ui.machine_node import MachineNode
         from ui.connection_line import ConnectionLine
+
+        # Ensure project exists (safety)
+        self._populate_projects()
 
         # 0. Load Configuration
         saved_style = get_setting("line_style", "rounded")
@@ -361,7 +591,7 @@ class MainWindow(QMainWindow):
 
         node_map: dict[int, object] = {}  # db_id → MachineNode
 
-        for row in get_all_placed_nodes():
+        for row in get_all_placed_nodes(self.current_project_id):
             machine = get_machine_by_id(row["machine_id"])
             if not machine:
                 continue
@@ -373,7 +603,8 @@ class MainWindow(QMainWindow):
             self.scene.add_machine_node(node)
             node_map[row["id"]] = node
 
-        for row in get_all_connections():
+        # 2. Load Connections for this project
+        for row in get_all_connections(self.current_project_id):
             src_node = node_map.get(row["source_node_id"])
             tgt_node = node_map.get(row["target_node_id"])
             if src_node and tgt_node:
@@ -407,13 +638,14 @@ class MainWindow(QMainWindow):
             get_all_placed_nodes, delete_placed_node, delete_connection,
             add_placed_node, add_connection, update_placed_node,
         )
-        # Simple strategy: clear and re-insert
-        for row in get_all_placed_nodes():
+        # Simple strategy: clear and re-insert FOR THIS PROJECT ONLY
+        for row in get_all_placed_nodes(self.current_project_id):
             delete_placed_node(row["id"])
 
         id_map: dict[int, int] = {}  # old_obj_id → new_db_id
         for node in self.scene.all_nodes():
             new_id = add_placed_node(
+                project_id=self.current_project_id,
                 machine_id=node.machine_data["id"],
                 recipe_id=node.current_recipe_id,
                 pos_x=node.pos().x(),

@@ -126,8 +126,11 @@ def add_recipe(name: str, machine_id: int, ingredients: list[dict], craft_time: 
 # Placed Nodes
 # ---------------------------------------------------------------------------
 
-def get_all_placed_nodes() -> list[dict]:
-    rows = get_connection().execute("SELECT * FROM Placed_Nodes").fetchall()
+def get_all_placed_nodes(project_id: int | None = None) -> list[dict]:
+    if project_id is None:
+        rows = get_connection().execute("SELECT * FROM Placed_Nodes").fetchall()
+    else:
+        rows = get_connection().execute("SELECT * FROM Placed_Nodes WHERE project_id = ?", (project_id,)).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -138,14 +141,14 @@ def get_placed_node_by_id(node_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def add_placed_node(machine_id: int, recipe_id: int | None = None,
+def add_placed_node(project_id: int, machine_id: int, recipe_id: int | None = None,
                     pos_x: float = 0.0, pos_y: float = 0.0,
                     clock_speed: float = 1.0) -> int:
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO Placed_Nodes (machine_id, recipe_id, pos_x, pos_y, clock_speed) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (machine_id, recipe_id, pos_x, pos_y, clock_speed),
+        "INSERT INTO Placed_Nodes (project_id, machine_id, recipe_id, pos_x, pos_y, clock_speed) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (project_id, machine_id, recipe_id, pos_x, pos_y, clock_speed),
     )
     conn.commit()
     return cur.lastrowid
@@ -177,8 +180,17 @@ def delete_placed_node(node_id: int) -> None:
 # Connections
 # ---------------------------------------------------------------------------
 
-def get_all_connections() -> list[dict]:
-    rows = get_connection().execute("SELECT * FROM Connections").fetchall()
+def get_all_connections(project_id: int | None = None) -> list[dict]:
+    if project_id is None:
+        rows = get_connection().execute("SELECT * FROM Connections").fetchall()
+    else:
+        # Join with Placed_Nodes to filter by project
+        query = """
+            SELECT c.* FROM Connections c
+            JOIN Placed_Nodes n ON c.source_node_id = n.id
+            WHERE n.project_id = ?
+        """
+        rows = get_connection().execute(query, (project_id,)).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -220,6 +232,31 @@ def delete_connection(connection_id: int) -> None:
     conn = get_connection()
     conn.execute("DELETE FROM Connections WHERE id = ?", (connection_id,))
     conn.commit()
+# ---------------------------------------------------------------------------
+# Projects
+# ---------------------------------------------------------------------------
+
+def get_all_projects() -> list[dict]:
+    rows = get_connection().execute("SELECT * FROM Projects ORDER BY last_modified DESC").fetchall()
+    return [dict(r) for r in rows]
+
+def add_project(name: str) -> int:
+    conn = get_connection()
+    cur = conn.execute("INSERT INTO Projects (name) VALUES (?)", (name,))
+    conn.commit()
+    return cur.lastrowid
+
+def rename_project(project_id: int, new_name: str) -> None:
+    conn = get_connection()
+    conn.execute("UPDATE Projects SET name = ?, last_modified = CURRENT_TIMESTAMP WHERE id = ?", (new_name, project_id))
+    conn.commit()
+
+def delete_project(project_id: int) -> None:
+    conn = get_connection()
+    # Cascading delete will handle nodes and connections
+    conn.execute("DELETE FROM Projects WHERE id = ?", (project_id,))
+    conn.commit()
+
 # ---------------------------------------------------------------------------
 # Global Settings (KV Store)
 # ---------------------------------------------------------------------------

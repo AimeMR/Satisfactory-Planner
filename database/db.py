@@ -36,6 +36,28 @@ def initialize_db() -> None:
     cursor = conn.cursor()
 
     try:
+        cursor.execute("SELECT project_id FROM Placed_Nodes LIMIT 1")
+    except sqlite3.OperationalError:
+        print("[DB] Missing project support. Migrating schema...")
+        # 1. Create Projects table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS Projects (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                name           TEXT    NOT NULL UNIQUE,
+                last_modified  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # 2. Add project_id to Placed_Nodes
+        cursor.execute("ALTER TABLE Placed_Nodes ADD COLUMN project_id INTEGER REFERENCES Projects(id) ON DELETE CASCADE")
+        
+        # 3. Create a Default Project if none exists
+        cursor.execute("INSERT OR IGNORE INTO Projects (id, name) VALUES (1, 'Default Project')")
+        
+        # 4. Migrate existing nodes
+        cursor.execute("UPDATE Placed_Nodes SET project_id = 1 WHERE project_id IS NULL")
+        conn.commit()
+
+    try:
         cursor.execute("SELECT * FROM Settings LIMIT 1")
     except sqlite3.OperationalError:
         # Just create the table if it's missing, no need to wipe entire DB
@@ -80,6 +102,13 @@ def initialize_db() -> None:
         type    TEXT    NOT NULL CHECK(type IN ('solid', 'liquid', 'gas'))
     );
 
+    -- Multiple projects
+    CREATE TABLE IF NOT EXISTS Projects (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        name           TEXT    NOT NULL UNIQUE,
+        last_modified  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
     -- User preferences (Line style, sidebar visibility, etc.)
     CREATE TABLE IF NOT EXISTS Settings (
         key    TEXT PRIMARY KEY,
@@ -116,6 +145,7 @@ def initialize_db() -> None:
     -- User-placed machine instances on the canvas
     CREATE TABLE IF NOT EXISTS Placed_Nodes (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id    INTEGER NOT NULL REFERENCES Projects(id) ON DELETE CASCADE,
         machine_id    INTEGER NOT NULL REFERENCES Machines(id),
         recipe_id     INTEGER          REFERENCES Recipes(id),
         pos_x         REAL    NOT NULL DEFAULT 0,
