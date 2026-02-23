@@ -43,6 +43,9 @@ class FactoryScene(QGraphicsScene):
         self._temp_line = None        # TempConnectionLine | None
         self._drag_src_port = None    # PortItem | None
 
+        # Copy/Paste clipboard — stores both 'nodes' and 'connections'
+        self._clipboard: dict = {"nodes": [], "connections": []}
+
     # ------------------------------------------------------------------
     # Drag-to-connect (initiated by PortItem.mousePressEvent)
     # ------------------------------------------------------------------
@@ -200,6 +203,102 @@ class FactoryScene(QGraphicsScene):
                     mismatch = len(src_outs.intersection(tgt_ins)) == 0
             conn.set_mismatch(mismatch)
 
+    # ------------------------------------------------------------------
+    # Copy / Paste Logic
+    # ------------------------------------------------------------------
+    def _copy_selection(self) -> None:
+        """Serialize selected nodes AND their internal connections into the clipboard."""
+        from ui.machine_node import MachineNode
+        from ui.connection_line import ConnectionLine
+        
+        self._clipboard = {"nodes": [], "connections": []}
+        selected_nodes = []
+        
+        # 1. Collect nodes
+        for item in self.selectedItems():
+            if isinstance(item, MachineNode):
+                selected_nodes.append(item)
+                self._clipboard["nodes"].append({
+                    "id": id(item),  # Internal ref for connection mapping
+                    "machine_data": item.machine_data,
+                    "recipe_id": item.current_recipe_id,
+                    "clock_speed": item.clock_speed,
+                    "pos": item.pos()
+                })
+        
+        # 2. Collect connections where BOTH ends are in the selection
+        node_ids = {id(n) for n in selected_nodes}
+        for item in self.selectedItems():
+            if isinstance(item, ConnectionLine):
+                src_node = item.src_port.parent_node
+                tgt_node = item.tgt_port.parent_node
+                if id(src_node) in node_ids and id(tgt_node) in node_ids:
+                    self._clipboard["connections"].append({
+                        "src_node_id": id(src_node),
+                        "tgt_node_id": id(tgt_node),
+                        "src_port_idx": item.src_port.index,
+                        "tgt_port_idx": item.tgt_port.index,
+                        "material_id": item.material_id
+                    })
+        # print(f"[CLIPBOARD] Copied {len(self._clipboard['nodes'])} nodes and {len(self._clipboard['connections'])} conns.")
+
+    def _paste_selection(self) -> None:
+        """Instantiate nodes and connections from the clipboard."""
+        if not self._clipboard["nodes"]:
+            return
+
+        from ui.machine_node import MachineNode
+        from ui.connection_line import ConnectionLine
+        
+        # Clear current selection so we select the new ones
+        self.clearSelection()
+
+        offset = QPointF(32, 32)
+        old_to_new_node = {} # Mapping old internal ID -> new MachineNode instance
+
+        # 1. Paste Nodes
+        for data in self._clipboard["nodes"]:
+            new_pos = data["pos"] + offset
+            node = MachineNode(
+                data["machine_data"], 
+                new_pos, 
+                self,
+                recipe_id=data["recipe_id"],
+                clock_speed=data["clock_speed"]
+            )
+            self.add_machine_node(node)
+            node.setSelected(True)
+            
+            # Record for connection mapping
+            old_to_new_node[data["id"]] = node
+            # Update stored pos for consecutive pastes
+            data["pos"] = new_pos
+
+        # 2. Paste Connections between the new nodes
+        for cdata in self._clipboard["connections"]:
+            src_clone = old_to_new_node.get(cdata["src_node_id"])
+            tgt_clone = old_to_new_node.get(cdata["tgt_node_id"])
+            
+            if src_clone and tgt_clone:
+                s_idx = cdata["src_port_idx"]
+                t_idx = cdata["tgt_port_idx"]
+                
+                # Bounds check
+                if s_idx < len(src_clone.output_ports) and t_idx < len(tgt_clone.input_ports):
+                    src_port = src_clone.output_ports[s_idx]
+                    tgt_port = tgt_clone.input_ports[t_idx]
+                    
+                    line = ConnectionLine(
+                        src_port, tgt_port,
+                        material_id=cdata["material_id"]
+                    )
+                    self.add_connection(line)
+                    src_port.connections.append(line)
+                    tgt_port.connections.append(line)
+                    line.setSelected(True)
+
+        self.recalculate()
+
 
 # ---------------------------------------------------------------------------
 # FactoryView
@@ -330,6 +429,20 @@ class FactoryView(QGraphicsView):
     # Keyboard: Delete / Backspace removes all selected items
     # ------------------------------------------------------------------
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        ctrl = bool(event.modifiers() & Qt.ControlModifier)
+
+        # Ctrl+C: Copy
+        if ctrl and event.key() == Qt.Key_C:
+            self.scene()._copy_selection()
+            event.accept()
+            return
+
+        # Ctrl+V: Paste
+        if ctrl and event.key() == Qt.Key_V:
+            self.scene()._paste_selection()
+            event.accept()
+            return
+
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             scene = self.scene()
             # Collect selected nodes and connections (copy list — deletion mutates it)
