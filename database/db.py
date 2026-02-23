@@ -128,7 +128,7 @@ def initialize_db() -> None:
     -- Base Recipe headers (Metadata only)
     CREATE TABLE IF NOT EXISTS Recipes (
         id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-        name               TEXT    NOT NULL,
+        name               TEXT    NOT NULL UNIQUE,
         machine_id         INTEGER NOT NULL REFERENCES Machines(id),
         craft_time         REAL    NOT NULL DEFAULT 2.0
     );

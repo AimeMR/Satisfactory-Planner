@@ -103,10 +103,16 @@ def get_recipe_by_id(recipe_id: int) -> dict | None:
 
 def add_recipe(name: str, machine_id: int, ingredients: list[dict], craft_time: float = 2.0) -> int:
     """
-    Insert a recipe and its materials.
+    Insert a recipe and its materials. Safe to call multiple times (checks name).
     ingredients: List of {"material_id": int, "amount": float, "is_input": bool}
     """
     conn = get_connection()
+    
+    # Check if recipe already exists
+    row = conn.execute("SELECT id FROM Recipes WHERE name = ?", (name,)).fetchone()
+    if row:
+        return row["id"]
+
     cur = conn.execute(
         "INSERT INTO Recipes (name, machine_id, craft_time) VALUES (?, ?, ?)",
         (name, machine_id, craft_time),
