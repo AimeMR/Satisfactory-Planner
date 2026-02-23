@@ -43,6 +43,8 @@ _MACHINE_COLORS: dict[str, str] = {
     "Miner Mk.3":       "#1a6a1a",
     "Water Extractor":  "#003a5c",
     "Oil Extractor":    "#3a1a00",
+    "Conveyor Splitter": "#5c3d1a",
+    "Conveyor Merger":   "#1a5c4d",
 }
 _DEFAULT_COLOR    = "#2a2a4a"
 _HEADER_ALPHA     = 200          # header strip alpha
@@ -139,10 +141,13 @@ class MachineNode(QGraphicsItem):
     # Recipe combo
     # ------------------------------------------------------------------
     def _build_combo(self, scene) -> None:
+        # Logistics nodes don't need a recipe combo
+        is_logistics = "Splitter" in self.machine_data["name"] or "Merger" in self.machine_data["name"]
+        if is_logistics:
+            return
+
         from database.crud import get_recipes_for_machine
         recipes = get_recipes_for_machine(self.machine_data["id"])
-        if not recipes:
-            return
 
         combo = QComboBox()
         combo.addItem("— select recipe —", None)
@@ -253,11 +258,13 @@ class MachineNode(QGraphicsItem):
                          self.machine_data["name"])
 
         # ── Stats below the combo ───────────────────────────────────────────────
-        if self._status != "no_recipe":
+        if self._status != "no_recipe" or "Splitter" in self.machine_data["name"] or "Merger" in self.machine_data["name"]:
             stat_font = QFont("Segoe UI", 9)
             painter.setFont(stat_font)
 
-            y = 84   # first stat line (below proxy at y=44+25=69 + gap)
+            is_logistics = "Splitter" in self.machine_data["name"] or "Merger" in self.machine_data["name"]
+            y = 48 if is_logistics else 84   # move up if no combo proxy
+
 
             # Output velocity
             out_color = QColor("#aaffaa") if self._status == "ok" else QColor("#ffaaaa")

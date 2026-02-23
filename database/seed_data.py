@@ -13,12 +13,12 @@ from .crud import (
 
 def seed_db() -> None:
     """Seed all baseline game data. Safe to call multiple times."""
-    if not get_all_materials():
+    if not get_all_materials() or len(get_all_machines()) < 14:
         _seed_materials()
         _seed_machines()
         _seed_recipes()
         _seed_mining_recipes()
-        print("[DB] Seed data inserted successfully.")
+        print("[DB] Seed data inserted/updated successfully.")
     else:
         print("[DB] Seed data already present, skipping.")
 
@@ -83,6 +83,8 @@ def _seed_machines() -> None:
         ("Manufacturer",      55.0,   4, 1),
         ("Refinery",          30.0,   2, 2),
         ("Packager",          10.0,   2, 2),
+        ("Conveyor Splitter",  0.0,   1, 3),
+        ("Conveyor Merger",    0.0,   3, 1),
     ]
     for name, power, inputs, outputs in machines:
         add_machine(name, power, inputs, outputs)

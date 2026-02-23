@@ -27,9 +27,12 @@ def get_material_by_id(material_id: int) -> dict | None:
 def add_material(name: str, type_: str) -> int:
     """Insert a material and return its new id."""
     conn = get_connection()
-    cur = conn.execute("INSERT INTO Materials (name, type) VALUES (?, ?)", (name, type_))
+    cur = conn.execute("INSERT OR IGNORE INTO Materials (name, type) VALUES (?, ?)", (name, type_))
     conn.commit()
-    return cur.lastrowid
+    if cur.lastrowid:
+        return cur.lastrowid
+    row = conn.execute("SELECT id FROM Materials WHERE name = ?", (name,)).fetchone()
+    return row["id"]
 
 
 # ---------------------------------------------------------------------------
@@ -52,12 +55,15 @@ def add_machine(name: str, base_power: float,
                 inputs_allowed: int, outputs_allowed: int) -> int:
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO Machines (name, base_power, inputs_allowed, outputs_allowed) "
+        "INSERT OR IGNORE INTO Machines (name, base_power, inputs_allowed, outputs_allowed) "
         "VALUES (?, ?, ?, ?)",
         (name, base_power, inputs_allowed, outputs_allowed),
     )
     conn.commit()
-    return cur.lastrowid
+    if cur.lastrowid:
+        return cur.lastrowid
+    row = conn.execute("SELECT id FROM Machines WHERE name = ?", (name,)).fetchone()
+    return row["id"]
 
 
 # ---------------------------------------------------------------------------

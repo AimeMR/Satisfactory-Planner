@@ -124,26 +124,28 @@ def calculate_production(
         recipe_id = node.get("recipe_id")
         recipe = recipe_map.get(recipe_id) if recipe_id else None
 
+        # Determine if this is a logistics node (Merger/Splitter)
+        is_logistics = "Merger" in machine_name or "Splitter" in machine_name
+
         if recipe is None:
+            # Logistics nodes are "OK" even without a recipe
+            status = "ok" if is_logistics else "no_recipe"
             result.nodes[node_id] = NodeResult(
                 node_id=node_id,
                 machine_name=machine_name,
                 recipe_name=None,
                 output_rate=0.0,
                 inputs=[],
-                status="no_recipe",
+                status=status,
             )
             node_output_rate[node_id] = 0.0
             continue
 
+        # ... rest of node processing ...
         clock_speed = node.get("clock_speed", 1.0)
         craft_time  = recipe["craft_time"]          # seconds per cycle
 
-        # Each recipe row in DB now has recipe['materials'] list attached by CRUD.
         items = recipe.get("materials", [])
-        
-        # Calculate items/min for each component
-        # Formula: items_per_min = (amount / craft_time) * 60 * clock_speed
         input_list = []
         node_output_rate[node_id] = 0.0
 
@@ -152,8 +154,6 @@ def calculate_production(
             if item["is_input"]:
                 input_list.append({"material": item["material_name"], "rate": rate})
             else:
-                # For now we assume one primary output for flow splitting
-                # But we sum them if there are multiple (e.g. byproducts)
                 node_output_rate[node_id] += rate
 
         result.nodes[node_id] = NodeResult(
@@ -165,29 +165,85 @@ def calculate_production(
             status="ok",
         )
 
-    # --- Compute per-connection flow and status ---
-    # Count outgoing connections per source node to split flow
-    out_counts = {nid: len(adj) for nid, adj in graph["adjacency"].items()}
+    # --- Pass-through Flow Propagation (Logistics) ---
+    # We do multiple passes to propagate flow through Mergers/Splitters
+    for _ in range(5):
+        # Reset logistics outputs for this pass
+        logistics_acc = {} # node_id -> accumulated flow
+        
+        # Calculate outgoing flow for each connection
+        out_counts = {nid: len(adj) for nid, adj in graph["adjacency"].items()}
+        
+        for conn_id, conn in graph["connections"].items():
+            src_id = conn["source_node_id"]
+            tgt_id = conn["target_node_id"]
+            
+            total_src_rate = node_output_rate.get(src_id, 0.0)
+            num_conns      = out_counts.get(src_id, 1)
+            src_rate       = total_src_rate / num_conns if num_conns > 0 else 0.0
+            
+            # If target is logistics, accumulate
+            tgt_node = graph["nodes"].get(tgt_id)
+            if tgt_node:
+                tgt_mach = machine_map.get(tgt_node["machine_id"])
+                if tgt_mach and ("Merger" in tgt_mach["name"] or "Splitter" in tgt_mach["name"]):
+                    logistics_acc[tgt_id] = logistics_acc.get(tgt_id, 0.0) + src_rate
 
+        # Apply accumulated flow to logistics node outputs for next pass
+        changed = False
+        for nid, acc_rate in logistics_acc.items():
+            if round(node_output_rate.get(nid, 0.0), 4) != round(acc_rate, 4):
+                node_output_rate[nid] = acc_rate
+                result.nodes[nid].output_rate = round(acc_rate, 4)
+                changed = True
+        if not changed: break
+
+    # --- Compute final per-connection results ---
+    out_counts = {nid: len(adj) for nid, adj in graph["adjacency"].items()}
     for conn_id, conn in graph["connections"].items():
         src_id = conn["source_node_id"]
         tgt_id = conn["target_node_id"]
 
-        # Split source production among all outgoing connections
         total_src_rate = node_output_rate.get(src_id, 0.0)
         num_conns      = out_counts.get(src_id, 1)
         src_rate       = total_src_rate / num_conns if num_conns > 0 else 0.0
 
-        tgt_node_r  = result.nodes.get(tgt_id)
-        # Total demand is the sum of inputs required by target
-        demand = tgt_node_r.total_input_rate if tgt_node_r else 0.0
+        tgt_node_r = result.nodes.get(tgt_id)
+        demand     = tgt_node_r.total_input_rate if tgt_node_r else 0.0
 
-        mat = material_map.get(conn["material_id"]) if conn.get("material_id") else None
-        mat_name = mat["name"] if mat else None
+        # Dynamic Material Detection
+        mat_name = None
+        if conn.get("material_id"):
+            mat = material_map.get(conn["material_id"])
+            if mat: mat_name = mat["name"]
+        
+        if not mat_name:
+            # Guess from source node output
+            src_nr = result.nodes.get(src_id)
+            if src_nr and src_nr.recipe_name:
+                # If source has recipe, pick the first output material
+                src_recipe_id = graph["nodes"][src_id].get("recipe_id")
+                src_recipe = recipe_map.get(src_recipe_id)
+                if src_recipe and "materials" in src_recipe:
+                    outputs = [m for m in src_recipe["materials"] if not m["is_input"]]
+                    if outputs:
+                        mat_name = outputs[0]["material_name"]
+            elif src_nr and ("Merger" in src_nr.machine_name or "Splitter" in src_nr.machine_name):
+                # Logistics nodes don't have recipes, but we could propagate name too... 
+                # (For now, let's keep it simple: if no explicit mat, use source recipe)
+                pass
 
-        if src_rate < demand - 0.001:
+        # Find specific demand for this material at the target
+        demand = 0.0
+        if tgt_node_r:
+            for inp in tgt_node_r.inputs:
+                if inp["material"] == mat_name:
+                    demand = inp["rate"]
+                    break
+
+        if mat_name and src_rate < demand - 0.001:
             status = "deficit"
-        elif src_rate > demand + 0.001:
+        elif mat_name and src_rate > demand + 0.001:
             status = "surplus"
         else:
             status = "ok"
