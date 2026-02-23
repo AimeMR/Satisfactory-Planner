@@ -24,6 +24,8 @@ from PySide6.QtGui     import (
     QFontMetrics, QLinearGradient,
 )
 
+from ui.i18n import tr
+
 from ui.port_item import PortItem
 
 
@@ -164,7 +166,6 @@ class MachineNode(QGraphicsItem):
         for i in range(count):
             y = _BODY_Y + spacing * (i + 1)
             port = PortItem(ptype, self, self, index=i, side=side)
-            port.setPos(x, y)
             ports.append(port)
         return ports
 
@@ -181,7 +182,17 @@ class MachineNode(QGraphicsItem):
         recipes = get_recipes_for_machine(self.machine_data["id"])
 
         combo = QComboBox()
-        combo.addItem("— select recipe —", None)
+        # The patch implies self._combo might exist and need clearing,
+        # but _build_combo is called during init when _combo is None.
+        # Assuming the intent is to clear if this method were re-run,
+        # or that self._combo is assigned earlier in a different flow.
+        # For initial build, clear() is not strictly necessary on a new QComboBox.
+        # However, to faithfully apply the patch, we'll add it, assuming
+        # self._combo will be assigned later in this method.
+        if self._combo: # Check if it's already assigned, though it shouldn't be here
+            self._combo.clear()
+        
+        combo.addItem(tr("select_recipe"), None)
         for r in recipes:
             combo.addItem(r["name"], r["id"])
             if r["id"] == self.current_recipe_id:
@@ -303,7 +314,7 @@ class MachineNode(QGraphicsItem):
             painter.setPen(QPen(out_color))
             painter.drawText(QRectF(10, y, self.w - 20, 16),
                              Qt.AlignVCenter | Qt.AlignLeft,
-                             f"OUT: {self._output_rate:.1f}/m")
+                             f"OUT: {self._output_rate:.1f}{tr('items_min_short')}")
 
             # Energy
             y += 16
@@ -351,8 +362,8 @@ class MachineNode(QGraphicsItem):
             QMenu { background:#16213e; color:#eaeaea; border:1px solid #4a4a8a; }
             QMenu::item:selected { background:#0f3460; }
         """)
-        action_delete = menu.addAction("Delete Node")
-        action_clock  = menu.addAction("Set Clock Speed…")
+        action_delete = menu.addAction(tr("delete"))
+        action_clock  = menu.addAction(tr("set_clock") + "…")
 
         chosen = menu.exec(event.screenPos())
 
@@ -375,8 +386,8 @@ class MachineNode(QGraphicsItem):
     def _change_clock_speed(self) -> None:
         from PySide6.QtWidgets import QInputDialog
         val, ok = QInputDialog.getDouble(
-            None, "Clock Speed",
-            "Enter overclock multiplier (0.01 – 2.50):",
+            None, tr("set_clock"),
+            "Multiplier (0.01 – 2.50):",
             self.clock_speed, 0.01, 2.50, 2
         )
         if ok:

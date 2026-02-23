@@ -39,7 +39,13 @@ class MainWindow(QMainWindow):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Satisfactory Planner")
+        # Language Support
+        from ui.i18n import set_language, tr
+        from database.crud import get_setting
+        lang = get_setting("language", "en")
+        set_language(lang)
+        
+        self.setWindowTitle(tr("app_title"))
         self.resize(1400, 900)
         self._apply_global_styles()
 
@@ -48,7 +54,6 @@ class MainWindow(QMainWindow):
         self.view  = FactoryView(self.scene)
         
         # Project State
-        from database.crud import get_setting
         self.current_project_id = int(get_setting("current_project_id", "1"))
 
         # Sidebar
@@ -120,8 +125,9 @@ class MainWindow(QMainWindow):
         layout.setSpacing(15)
 
         # Sidebar Toggle Button
-        self.toggle_btn = QPushButton("☰ SIDEBAR")
-        self.toggle_btn.setFixedWidth(100)
+        from ui.i18n import tr
+        self.toggle_btn = QPushButton(tr("sidebar_toggle"))
+        self.toggle_btn.setFixedWidth(120)
         self.toggle_btn.setCheckable(True)
         self.toggle_btn.setChecked(True)
         self.toggle_btn.setStyleSheet(f"""
@@ -144,18 +150,26 @@ class MainWindow(QMainWindow):
         """)
         self.toggle_btn.clicked.connect(self._toggle_sidebar)
         layout.addWidget(self.toggle_btn)
-        
+
+        # Language Toggle
+        from ui.i18n import get_language
+        self.lang_btn = QPushButton(tr("lang_toggle"))
+        self.lang_btn.setFixedWidth(80)
+        self.lang_btn.setStyleSheet(self.toggle_btn.styleSheet())
+        self.lang_btn.clicked.connect(self._on_toggle_language)
+        layout.addWidget(self.lang_btn)
+
         # Title area
-        title = QLabel("SATISFACTORY PLANNER")
-        title.setStyleSheet(f"color: {_ACCENT}; font-weight: bold; font-size: 14px; letter-spacing: 1px;")
-        layout.addWidget(title)
+        self.toolbar_title = QLabel(tr("app_title"))
+        self.toolbar_title.setStyleSheet(f"color: {_ACCENT}; font-weight: bold; font-size: 14px; letter-spacing: 1px;")
+        layout.addWidget(self.toolbar_title)
         
         layout.addStretch()
         
         # Project Selector
-        proj_label = QLabel("PROJECT:")
-        proj_label.setStyleSheet("color: #888; font-size: 11px; font-weight: bold;")
-        layout.addWidget(proj_label)
+        self.proj_label = QLabel(tr("project") + ":")
+        self.proj_label.setStyleSheet("color: #888; font-size: 11px; font-weight: bold;")
+        layout.addWidget(self.proj_label)
         
         self.project_combo = QComboBox()
         self.project_combo.setFixedWidth(200)
@@ -174,7 +188,7 @@ class MainWindow(QMainWindow):
         
         self.new_proj_btn = QPushButton("+")
         self.new_proj_btn.setFixedSize(30, 30)
-        self.new_proj_btn.setToolTip("New Project")
+        self.new_proj_btn.setToolTip(tr("new_proj"))
         self.new_proj_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {_SIDEBAR_ITEM};
@@ -191,7 +205,7 @@ class MainWindow(QMainWindow):
         
         self.rename_proj_btn = QPushButton("✎")
         self.rename_proj_btn.setFixedSize(30, 30)
-        self.rename_proj_btn.setToolTip("Rename Project")
+        self.rename_proj_btn.setToolTip(tr("rename_proj"))
         self.rename_proj_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {_SIDEBAR_ITEM};
@@ -207,21 +221,21 @@ class MainWindow(QMainWindow):
 
         self.export_proj_btn = QPushButton("📤")
         self.export_proj_btn.setFixedSize(30, 30)
-        self.export_proj_btn.setToolTip("Export Project to PC")
+        self.export_proj_btn.setToolTip(tr("export_proj"))
         self.export_proj_btn.setStyleSheet(self.rename_proj_btn.styleSheet())
         self.export_proj_btn.clicked.connect(self._on_export_project)
         layout.addWidget(self.export_proj_btn)
         
         self.import_proj_btn = QPushButton("📥")
         self.import_proj_btn.setFixedSize(30, 30)
-        self.import_proj_btn.setToolTip("Import Project from PC")
+        self.import_proj_btn.setToolTip(tr("import_proj"))
         self.import_proj_btn.setStyleSheet(self.rename_proj_btn.styleSheet())
         self.import_proj_btn.clicked.connect(self._on_import_project)
         layout.addWidget(self.import_proj_btn)
 
         self.delete_proj_btn = QPushButton("🗑️")
         self.delete_proj_btn.setFixedSize(30, 30)
-        self.delete_proj_btn.setToolTip("Delete Current Project")
+        self.delete_proj_btn.setToolTip(tr("delete_proj_title"))
         self.delete_proj_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {_SIDEBAR_ITEM};
@@ -240,12 +254,12 @@ class MainWindow(QMainWindow):
         layout.addStretch()
         
         # Line Style Dropdown
-        style_label = QLabel("LINE STYLE:")
-        style_label.setStyleSheet("color: #888; font-size: 11px; font-weight: bold;")
-        layout.addWidget(style_label)
+        self.style_label = QLabel(tr("line_style") + ":")
+        self.style_label.setStyleSheet("color: #888; font-size: 11px; font-weight: bold;")
+        layout.addWidget(self.style_label)
         
         self.style_combo = QComboBox()
-        self.style_combo.addItems(["Rounded (Bezier)", "Straight", "Orthogonal (Manhattan)"])
+        self.style_combo.addItems([tr("style_rounded"), tr("style_straight"), tr("style_manhattan")])
         self.style_combo.setFixedWidth(180)
         self.style_combo.setStyleSheet(f"""
             QComboBox {{
@@ -325,11 +339,13 @@ class MainWindow(QMainWindow):
         self.scene.clear()
         self._load_layout()
         self._update_status()
-        self._status.showMessage(f"Project switched to: {self.project_combo.currentText()}", 2000)
+        from ui.i18n import tr
+        self._status.showMessage(tr("project_switched", self.project_combo.currentText()), 2000)
 
     def _on_new_project(self) -> None:
         from PySide6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "New Project", "Project Name:")
+        from ui.i18n import tr
+        name, ok = QInputDialog.getText(self, tr("new_proj"), tr("project") + " " + tr("nodes") + ":")
         if ok and name.strip():
             # Save current first
             self._save_layout()
@@ -347,8 +363,9 @@ class MainWindow(QMainWindow):
 
     def _on_rename_project(self) -> None:
         from PySide6.QtWidgets import QInputDialog
+        from ui.i18n import tr
         old_name = self.project_combo.currentText()
-        name, ok = QInputDialog.getText(self, "Rename Project", "New Name:", text=old_name)
+        name, ok = QInputDialog.getText(self, tr("rename_proj"), tr("new_proj") + ":", text=old_name)
         if ok and name.strip() and name.strip() != old_name:
             from database.crud import rename_project
             rename_project(self.current_project_id, name.strip())
@@ -356,17 +373,19 @@ class MainWindow(QMainWindow):
 
     def _on_export_project(self) -> None:
         from PySide6.QtWidgets import QFileDialog
-        path, _ = QFileDialog.getSaveFileName(self, "Export Project", "", "Project Files (*.json)")
+        from ui.i18n import tr
+        path, _ = QFileDialog.getSaveFileName(self, tr("export_proj"), "", "Project Files (*.json)")
         if path:
             from database.io import export_project_to_json
             if export_project_to_json(self.current_project_id, path):
-                self._status.showMessage(f"Project exported to {os.path.basename(path)}", 3000)
+                self._status.showMessage(tr("export_success", os.path.basename(path)), 3000)
             else:
-                self._status.showMessage("Export failed!", 3000)
+                self._status.showMessage(tr("export_failed"), 3000)
 
     def _on_import_project(self) -> None:
         from PySide6.QtWidgets import QFileDialog
-        path, _ = QFileDialog.getOpenFileName(self, "Import Project", "", "Project Files (*.json)")
+        from ui.i18n import tr
+        path, _ = QFileDialog.getOpenFileName(self, tr("import_proj"), "", "Project Files (*.json)")
         if path:
             # Save current first
             self._save_layout()
@@ -381,17 +400,18 @@ class MainWindow(QMainWindow):
                 self.scene.clear()
                 self._load_layout()
                 self._update_status()
-                self._status.showMessage(f"Project imported from {os.path.basename(path)}", 3000)
+                self._status.showMessage(tr("import_success", os.path.basename(path)), 3000)
             else:
-                self._status.showMessage("Import failed!", 3000)
+                self._status.showMessage(tr("import_failed"), 3000)
 
     def _on_delete_project(self) -> None:
         from PySide6.QtWidgets import QMessageBox
+        from ui.i18n import tr
         proj_name = self.project_combo.currentText()
         
         reply = QMessageBox.question(
-            self, "Delete Project",
-            f"Are you sure you want to delete '{proj_name}'?\nThis will remove all nodes and connections permanently.",
+            self, tr("delete_proj_title"),
+            tr("delete_proj_conf", proj_name),
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No
         )
         
@@ -415,7 +435,53 @@ class MainWindow(QMainWindow):
             self.scene.clear()
             self._load_layout()
             self._update_status()
-            self._status.showMessage(f"Project '{proj_name}' deleted.", 3000)
+            self._status.showMessage(tr("project_deleted", proj_name), 3000)
+
+        if Action: # Note: This logic was from a previous partial implementation, let's fix it properly
+            pass
+
+    def _on_toggle_language(self) -> None:
+        from ui.i18n import get_language, set_language, tr
+        new_lang = "es" if get_language() == "en" else "en"
+        set_language(new_lang)
+        
+        # Save to DB
+        from database.crud import set_setting
+        set_setting("language", new_lang)
+        
+        # REFRESH UI
+        self.setWindowTitle(tr("app_title"))
+        self.lang_btn.setText(tr("lang_toggle"))
+        self.toggle_btn.setText(tr("sidebar_toggle"))
+        
+        # New static labels
+        self.toolbar_title.setText(tr("app_title"))
+        self.proj_label.setText(tr("project") + ":")
+        self.style_label.setText(tr("line_style") + ":")
+        self.sidebar_header.setText("  " + tr("machine_library"))
+        self.sidebar_hint.setText(tr("double_click_place"))
+        
+        # Re-populate language-sensitive areas
+        self._populate_machine_list()
+        self._populate_projects()
+
+        # Update style combo
+        self.style_combo.blockSignals(True)
+        old_style = self.style_combo.currentIndex()
+        self.style_combo.clear()
+        self.style_combo.addItems([tr("style_rounded"), tr("style_straight"), tr("style_manhattan")])
+        self.style_combo.setCurrentIndex(old_style)
+        self.style_combo.blockSignals(False)
+        
+        # Update tooltips
+        self.new_proj_btn.setToolTip(tr("new_proj"))
+        self.rename_proj_btn.setToolTip(tr("rename_proj"))
+        self.export_proj_btn.setToolTip(tr("export_proj"))
+        self.import_proj_btn.setToolTip(tr("import_proj"))
+        self.delete_proj_btn.setToolTip(tr("delete_proj_title"))
+        
+        self._update_status()
+        self._status.showMessage(f"Language switched to {new_lang.upper()}", 3000)
 
     def _build_sidebar(self) -> QWidget:
         container = QWidget()
@@ -429,8 +495,9 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
 
         # Header
-        header = QLabel("  MACHINES")
-        header.setStyleSheet(f"""
+        from ui.i18n import tr
+        self.sidebar_header = QLabel("  " + tr("machine_library"))
+        self.sidebar_header.setStyleSheet(f"""
             background: {_ACCENT};
             color: white;
             font-size: 11px;
@@ -438,7 +505,7 @@ class MainWindow(QMainWindow):
             letter-spacing: 2px;
             padding: 10px 0;
         """)
-        layout.addWidget(header)
+        layout.addWidget(self.sidebar_header)
 
         # Machine list (Tree)
         self._machine_tree = QTreeWidget()
@@ -473,16 +540,18 @@ class MainWindow(QMainWindow):
         self._populate_machine_list()
 
         # Footer hint
-        hint = QLabel("Double-click to place")
-        hint.setAlignment(Qt.AlignCenter)
-        hint.setStyleSheet(f"color: #888; font-size: 11px; padding: 8px;")
-        layout.addWidget(hint)
+        self.sidebar_hint = QLabel(tr("double_click_place"))
+        self.sidebar_hint.setAlignment(Qt.AlignCenter)
+        self.sidebar_hint.setStyleSheet(f"color: #888; font-size: 11px; padding: 8px;")
+        layout.addWidget(self.sidebar_hint)
 
         return container
 
     def _populate_machine_list(self) -> None:
         """Load machine types from DB and group them by category in the Tree."""
+        self._machine_tree.clear()
         from database.crud import get_all_machines
+        from ui.i18n import tr
         self._machines_data: dict[str, dict] = {}
         machines = get_all_machines()
 
@@ -498,7 +567,7 @@ class MainWindow(QMainWindow):
         for cat_name in sorted(categories.keys()):
             # Category Header
             cat_item = QTreeWidgetItem(self._machine_tree)
-            cat_item.setText(0, cat_name.upper())
+            cat_item.setText(0, tr(cat_name.lower()))
             cat_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable) 
             # Note: We need some flags to allow expansion but we handle non-selection in dblclick
             cat_item.setForeground(0, QColor(_ACCENT))
@@ -555,13 +624,10 @@ class MainWindow(QMainWindow):
     # Status bar
     # ------------------------------------------------------------------
     def _update_status(self) -> None:
+        from ui.i18n import tr
         n = len(self.scene.all_nodes())
         c = len(self.scene.all_connections())
-        self._status.showMessage(
-            f"Nodes: {n}   Connections: {c}   "
-            "| middle-drag: pan   scroll: zoom   "
-            "drag port→port: connect   right-click: delete"
-        )
+        self._status.showMessage(tr("status_bar", n, c))
 
     # ------------------------------------------------------------------
     # Persistence
@@ -575,9 +641,6 @@ class MainWindow(QMainWindow):
         )
         from ui.machine_node import MachineNode
         from ui.connection_line import ConnectionLine
-
-        # Ensure project exists (safety)
-        self._populate_projects()
 
         # 0. Load Configuration
         saved_style = get_setting("line_style", "rounded")

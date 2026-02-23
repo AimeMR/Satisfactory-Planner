@@ -10,10 +10,11 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsTextItem, QGraphicsItem
 from PySide6.QtCore    import Qt, QPointF, QRectF
-from PySide6.QtGui     import (
+from PySide6.QtGui import (
     QPainterPath, QPen, QColor, QBrush, QFont,
-    QPainter,
+    QPainter
 )
+from ui.i18n import tr
 
 
 # Colour per material type
@@ -200,11 +201,11 @@ class ConnectionLine(QGraphicsPathItem):
 
     def _update_label(self) -> None:
         if self._material_mismatch:
-            html = "<span style='color:#ff1744; font-weight:bold;'>! MATERIAL MISMATCH !</span>"
+            html = f"<span style='color:#ff1744; font-weight:bold;'>{tr('mat_mismatch')}</span>"
         elif self._mat_name:
             # White material name, Yellow rate
             html = (f"<span style='color:#ffffff;'>{self._mat_name}</span> "
-                    f"<span style='color:#ffd54f;'>{self._flow_rate:.1f}/m</span>")
+                    f"<span style='color:#ffd54f;'>{self._flow_rate:.1f}{tr('items_min_short')}</span>")
         else:
             html = ""
         
@@ -234,7 +235,7 @@ class ConnectionLine(QGraphicsPathItem):
             "QMenu { background:#16213e; color:#eaeaea; border:1px solid #4a4a8a; }"
             "QMenu::item:selected { background:#0f3460; }"
         )
-        action_del = menu.addAction("Delete Connection")
+        action_del = menu.addAction(tr("delete_conn"))
         chosen = menu.exec(event.screenPos())
         if chosen == action_del:
             self._delete_self()
