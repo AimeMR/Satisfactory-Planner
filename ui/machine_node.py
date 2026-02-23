@@ -81,12 +81,15 @@ class MachineNode(QGraphicsItem):
         db_id: int | None = None,
         recipe_id: int | None = None,
         clock_speed: float = 1.0,
+        group_id: int | None = None,
     ):
         super().__init__()
         self.machine_data       = machine_data
-        self.node_db_id         = db_id
-        self.current_recipe_id  = recipe_id
-        self.clock_speed        = clock_speed
+        self._m_id              = machine_data["id"] # Store machine_id internally
+        self.db_id              = db_id # Renamed from node_db_id
+        self.recipe_id          = recipe_id # Renamed from current_recipe_id
+        self._clock_speed       = clock_speed # Renamed from clock_speed and made internal
+        self.group_id           = group_id # New
 
         # Dimensions (Logistics are smaller)
         self.is_logistics = "Splitter" in machine_data["name"] or "Merger" in machine_data["name"]
@@ -196,7 +199,7 @@ class MachineNode(QGraphicsItem):
         combo.addItem(tr("select_recipe"), None)
         for r in recipes:
             combo.addItem(r["name"], r["id"])
-            if r["id"] == self.current_recipe_id:
+            if r["id"] == self.recipe_id: # Changed from current_recipe_id
                 combo.setCurrentIndex(combo.count() - 1)
 
         combo.setStyleSheet("""
@@ -228,9 +231,9 @@ class MachineNode(QGraphicsItem):
     def _on_recipe_changed(self, index: int) -> None:
         if self._combo is None:
             return
-        self.current_recipe_id = self._combo.currentData()
+        self.recipe_id = self._combo.currentData() # Changed from current_recipe_id
         scene = self.scene()
-        if not self.current_recipe_id:
+        if not self.recipe_id: # Changed from current_recipe_id
             # Clear stats immediately if recipe deselected
             self._output_rate = 0.0
             self._inputs = []
@@ -245,9 +248,24 @@ class MachineNode(QGraphicsItem):
     # ------------------------------------------------------------------
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionHasChanged:
-            for port in self.input_ports + self.output_ports:
-                for conn in port.connections:
-                    conn.update_path()
+            for conn in self.input_ports + self.output_ports:
+                for c in conn.connections:
+                    c.update_path()
+            
+            # Notify parent group to refresh its bounds
+            if self.group_id is not None:
+                scene = self.scene()
+                if hasattr(scene, "_groups"):
+                    # Find the group object
+                    for g in scene._groups:
+                        if g.group_id == self.group_id:
+                            g.refresh_bounds()
+                            break
+            
+            # Update scene if selected (to redraw orange selection box)
+            if self.isSelected() and self.scene():
+                self.scene().update()
+                            
         return super().itemChange(change, value)
 
     # ------------------------------------------------------------------
@@ -364,42 +382,99 @@ class MachineNode(QGraphicsItem):
     # ------------------------------------------------------------------
     # Context menu (right-click)
     # ------------------------------------------------------------------
-    def contextMenuEvent(self, event) -> None:
+    def contextMenuEvent(self, event):
+        from PySide6.QtWidgets import QMenu, QInputDialog
+        from PySide6.QtGui import QAction
         menu = QMenu()
-        menu.setStyleSheet("""
-            QMenu { background:#16213e; color:#eaeaea; border:1px solid #4a4a8a; }
-            QMenu::item:selected { background:#0f3460; }
-        """)
-        action_delete = menu.addAction(tr("delete"))
-        action_clock  = menu.addAction(tr("set_clock") + "…")
+        menu.setStyleSheet(
+            "QMenu { background:#16213e; color:#eaeaea; border:1px solid #4a4a8a; }"
+            "QMenu::item:selected { background:#0f3460; }"
+        )
 
+        # ── Group Actions ──
+        if self.group_id is not None:
+            # Find the group object
+            scene = self.scene()
+            group_node = None
+            if hasattr(scene, "_groups"):
+                for g in scene._groups:
+                    if g.group_id == self.group_id:
+                        group_node = g
+                        break
+            
+            if group_node:
+                group_menu = menu.addMenu("📦 " + group_node.name)
+                
+                toggle_txt = "Expand" if group_node.is_collapsed else "Collapse"
+                act_toggle_grp = group_menu.addAction(toggle_txt)
+                act_ungroup_grp = group_menu.addAction("Ungroup")
+                
+                menu.addSeparator()
+
+        act_clock = menu.addAction(f"🕒 Change Clock Speed ({self._clock_speed*100:.1f}%)")
+        act_del   = menu.addAction("🗑 Delete Machine")
+
+        # In Qt, menu.exec expects a QPoint (global screen coordinates)
+        # event.screenPos() returns a QPoint in PyQt6/PySide6
         chosen = menu.exec(event.screenPos())
 
-        if chosen == action_delete:
+        if self.group_id is not None and group_node:
+            if chosen == act_toggle_grp:
+                group_node._toggle_state()
+                return
+            elif chosen == act_ungroup_grp:
+                group_node._ungroup()
+                return
+
+        if chosen == act_del:
             self._delete_self()
-        elif chosen == action_clock:
+        elif chosen == act_clock:
             self._change_clock_speed()
 
-    def _delete_self(self) -> None:
+    def _delete_self(self, recalculate: bool = True) -> None:
+        from database.crud import delete_placed_node
         scene = self.scene()
         if scene is None:
             return
-        # Remove all attached connections first
+
+        print(f"[DEBUG] Deleting MachineNode {self.db_id} (Group: {self.group_id})")
+
+        # 1. Remove from parent group list if applicable
+        if self.group_id is not None:
+            if hasattr(scene, "_groups"):
+                for g in scene._groups:
+                    if g.group_id == self.group_id:
+                        if self in g.members:
+                            g.members.remove(self)
+                        # Avoid refresh_bounds during bulk deletion
+                        if hasattr(g, "_is_deleting") and not g._is_deleting:
+                            g.refresh_bounds()
+                        break
+
+        # 2. Remove all attached connections from scene
         for port in self.input_ports + self.output_ports:
+            # list() copy because _delete_self modifies port.connections
             for conn in list(port.connections):
-                scene.remove_connection(conn)
+                conn._delete_self()
+        
+        # 3. Delete from DB
+        if self.db_id:
+            delete_placed_node(self.db_id)
+
+        # 4. Remove from Scene
         scene.remove_machine_node(self)
-        scene.recalculate()
+        if recalculate:
+            scene.recalculate()
 
     def _change_clock_speed(self) -> None:
         from PySide6.QtWidgets import QInputDialog
         val, ok = QInputDialog.getDouble(
             None, tr("set_clock"),
             "Multiplier (0.01 – 2.50):",
-            self.clock_speed, 0.01, 2.50, 2
+            self._clock_speed, 0.01, 2.50, 2 # Changed to _clock_speed
         )
         if ok:
-            self.clock_speed = val
+            self._clock_speed = val # Changed to _clock_speed
             scene = self.scene()
             if scene:
                 scene.recalculate()
@@ -424,17 +499,15 @@ class MachineNode(QGraphicsItem):
         """Energy consumption in MW using Satisfactory's overclocking formula."""
         base = self.machine_data.get("base_power", 0.0)
         # Formula: P = P_base * clock_speed ^ 1.321
-        return base * (self.clock_speed ** 1.321)
+        return base * (self._clock_speed ** 1.321) # Changed to _clock_speed
 
-    # ------------------------------------------------------------------
-    # DB serialisation helper
-    # ------------------------------------------------------------------
     def to_db_dict(self) -> dict:
         return {
-            "id":          self.node_db_id or id(self),
-            "machine_id":  self.machine_data["id"],
-            "recipe_id":   self.current_recipe_id,
-            "pos_x":       self.pos().x(),
-            "pos_y":       self.pos().y(),
-            "clock_speed": self.clock_speed,
+            "id": self.db_id,
+            "machine_id": self._m_id,
+            "recipe_id": self.recipe_id,
+            "group_id": self.group_id,
+            "pos_x": self.pos().x(),
+            "pos_y": self.pos().y(),
+            "clock_speed": self._clock_speed,
         }

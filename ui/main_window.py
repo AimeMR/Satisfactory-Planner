@@ -4,6 +4,7 @@ Phase 2 — Application shell: sidebar + canvas + status bar.
 """
 
 from __future__ import annotations
+import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QTreeWidget, QTreeWidgetItem, QLabel, QSplitter,
@@ -55,6 +56,7 @@ class MainWindow(QMainWindow):
         
         # Project State
         self.current_project_id = int(get_setting("current_project_id", "1"))
+        self.scene.project_id = self.current_project_id
 
         # Sidebar
         self._sidebar = self._build_sidebar()
@@ -743,8 +745,19 @@ class MainWindow(QMainWindow):
         self.toggle_btn.setChecked(is_visible)
         self._sidebar.setVisible(is_visible)
 
-        node_map: dict[int, object] = {}  # db_id → MachineNode
+        node_map: dict[int, MachineNode] = {}  # db_id → MachineNode
+        group_map: dict[int, SubFactoryNode] = {}
 
+        # 1. Load Groups
+        from database.crud import get_all_groups
+        from ui.sub_factory_node import SubFactoryNode
+        for gdata in get_all_groups(self.current_project_id):
+            sub_node = SubFactoryNode(gdata, self.scene)
+            self.scene.addItem(sub_node)
+            self.scene._groups.append(sub_node)
+            group_map[gdata["id"]] = sub_node
+
+        # 2. Load Nodes
         for row in get_all_placed_nodes(self.current_project_id):
             machine = get_machine_by_id(row["machine_id"])
             if not machine:
@@ -753,9 +766,18 @@ class MainWindow(QMainWindow):
             node = MachineNode(machine, pos, self.scene,
                                db_id=row["id"],
                                recipe_id=row.get("recipe_id"),
-                               clock_speed=row.get("clock_speed", 1.0))
+                               clock_speed=row.get("clock_speed", 1.0),
+                               group_id=row.get("group_id"))
             self.scene.add_machine_node(node)
             node_map[row["id"]] = node
+            
+            # Link to group
+            gid = row.get("group_id")
+            if gid and gid in group_map:
+                group_node = group_map[gid]
+                group_node.members.append(node)
+                if group_node.is_collapsed:
+                    node.setVisible(False)
 
         # 2. Load Connections for this project
         for row in get_all_connections(self.current_project_id):
@@ -778,6 +800,11 @@ class MainWindow(QMainWindow):
                     tgt_port.connections.append(line)
 
         if node_map:
+            # 3. Post-load: Initialize Proxy Ports for Collapsed Groups
+            # This must happen AFTER all nodes and connections are loaded
+            for group in self.scene._groups:
+                if group.is_collapsed:
+                    group._create_proxy_ports()
             self.scene.recalculate()
         self._update_status()
 
@@ -790,25 +817,55 @@ class MainWindow(QMainWindow):
         """Write all placed node positions and connections back to DB."""
         from database.crud import (
             get_all_placed_nodes, delete_placed_node, delete_connection,
-            add_placed_node, add_connection, update_placed_node,
+            add_placed_node, add_connection, get_all_groups, delete_group, add_group,
+            update_group_collapse,
         )
-        # Simple strategy: clear and re-insert FOR THIS PROJECT ONLY
+        
+        # 1. Clear everything for this project
         for row in get_all_placed_nodes(self.current_project_id):
             delete_placed_node(row["id"])
+        for row in get_all_groups(self.current_project_id):
+            delete_group(row["id"])
 
+        # 2. Map Groups
+        group_id_map: dict[int, int] = {} # old_obj_id -> new_db_id
+        for group in self.scene._groups:
+            # Safety check: skip if the C++ object was already deleted
+            try:
+                if not group.scene(): continue
+            except RuntimeError:
+                continue
+
+            new_gid = add_group(
+                project_id=self.current_project_id,
+                name=group.name,
+                x=group.pos().x(),
+                y=group.pos().y()
+            )
+            update_group_collapse(new_gid, group.is_collapsed)
+            group_id_map[id(group)] = new_gid
+            group.group_id = new_gid
+
+        # 3. Map Nodes
         id_map: dict[int, int] = {}  # old_obj_id → new_db_id
         for node in self.scene.all_nodes():
+            # Find group_id if node belongs to a group
+            parent_group = next((g for g in self.scene._groups if node in g.members), None)
+            new_gid = group_id_map.get(id(parent_group)) if parent_group else None
+            
             new_id = add_placed_node(
                 project_id=self.current_project_id,
-                machine_id=node.machine_data["id"],
-                recipe_id=node.current_recipe_id,
+                machine_id=node._m_id,
+                recipe_id=node.recipe_id,
                 pos_x=node.pos().x(),
                 pos_y=node.pos().y(),
-                clock_speed=node.clock_speed,
+                clock_speed=node._clock_speed,
+                group_id=new_gid
             )
             id_map[id(node)] = new_id
-            node.node_db_id = new_id
+            node.db_id = new_id
 
+        # 4. Map Connections
         for conn in self.scene.all_connections():
             src_node = conn.src_port.parent_node
             tgt_node = conn.tgt_port.parent_node

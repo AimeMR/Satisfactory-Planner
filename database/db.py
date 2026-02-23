@@ -57,12 +57,26 @@ def initialize_db() -> None:
         cursor.execute("UPDATE Placed_Nodes SET project_id = 1 WHERE project_id IS NULL")
         conn.commit()
 
+    # Settings table is safe with IF NOT EXISTS
+    cursor.execute("CREATE TABLE IF NOT EXISTS Settings (key TEXT PRIMARY KEY, value TEXT)")
+    conn.commit()
+
+    # Groups and Grouping Migration
     try:
-        cursor.execute("SELECT * FROM Settings LIMIT 1")
+        cursor.execute("SELECT group_id FROM Placed_Nodes LIMIT 1")
     except sqlite3.OperationalError:
-        # Just create the table if it's missing, no need to wipe entire DB
-        # unless it's a major breaking change.
-        cursor.execute("CREATE TABLE IF NOT EXISTS Settings (key TEXT PRIMARY KEY, value TEXT)")
+        print("[DB] Grouping schema missing. Adding Groups table and group_id...")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS Groups (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id   INTEGER NOT NULL REFERENCES Projects(id) ON DELETE CASCADE,
+                name         TEXT    NOT NULL,
+                pos_x        REAL    NOT NULL DEFAULT 0,
+                pos_y        REAL    NOT NULL DEFAULT 0,
+                is_collapsed INTEGER NOT NULL DEFAULT 0 -- 0=expanded, 1=collapsed
+            )
+        """)
+        cursor.execute("ALTER TABLE Placed_Nodes ADD COLUMN group_id INTEGER REFERENCES Groups(id) ON DELETE SET NULL")
         conn.commit()
 
     try:
@@ -115,6 +129,16 @@ def initialize_db() -> None:
         value  TEXT
     );
 
+    -- Logical groups of machines
+    CREATE TABLE IF NOT EXISTS Groups (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id   INTEGER NOT NULL REFERENCES Projects(id) ON DELETE CASCADE,
+        name         TEXT    NOT NULL,
+        pos_x        REAL    NOT NULL DEFAULT 0,
+        pos_y        REAL    NOT NULL DEFAULT 0,
+        is_collapsed INTEGER NOT NULL DEFAULT 0 -- 0=expanded, 1=collapsed
+    );
+
     -- Base machine blueprints (Smelter, Constructor, etc.)
     CREATE TABLE IF NOT EXISTS Machines (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -148,6 +172,7 @@ def initialize_db() -> None:
         project_id    INTEGER NOT NULL REFERENCES Projects(id) ON DELETE CASCADE,
         machine_id    INTEGER NOT NULL REFERENCES Machines(id),
         recipe_id     INTEGER          REFERENCES Recipes(id),
+        group_id      INTEGER          REFERENCES Groups(id) ON DELETE SET NULL,
         pos_x         REAL    NOT NULL DEFAULT 0,
         pos_y         REAL    NOT NULL DEFAULT 0,
         clock_speed   REAL    NOT NULL DEFAULT 1.0

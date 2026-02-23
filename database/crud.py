@@ -149,12 +149,12 @@ def get_placed_node_by_id(node_id: int) -> dict | None:
 
 def add_placed_node(project_id: int, machine_id: int, recipe_id: int | None = None,
                     pos_x: float = 0.0, pos_y: float = 0.0,
-                    clock_speed: float = 1.0) -> int:
+                    clock_speed: float = 1.0, group_id: int | None = None) -> int:
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO Placed_Nodes (project_id, machine_id, recipe_id, pos_x, pos_y, clock_speed) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (project_id, machine_id, recipe_id, pos_x, pos_y, clock_speed),
+        "INSERT INTO Placed_Nodes (project_id, machine_id, recipe_id, pos_x, pos_y, clock_speed, group_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (project_id, machine_id, recipe_id, pos_x, pos_y, clock_speed, group_id),
     )
     conn.commit()
     return cur.lastrowid
@@ -163,9 +163,9 @@ def add_placed_node(project_id: int, machine_id: int, recipe_id: int | None = No
 def update_placed_node(node_id: int, **kwargs) -> None:
     """Update any subset of fields on a placed node.
     
-    Allowed kwargs: recipe_id, pos_x, pos_y, clock_speed
+    Allowed kwargs: recipe_id, pos_x, pos_y, clock_speed, group_id
     """
-    allowed = {"recipe_id", "pos_x", "pos_y", "clock_speed"}
+    allowed = {"recipe_id", "pos_x", "pos_y", "clock_speed", "group_id"}
     updates = {k: v for k, v in kwargs.items() if k in allowed}
     if not updates:
         return
@@ -178,6 +178,8 @@ def update_placed_node(node_id: int, **kwargs) -> None:
 
 def delete_placed_node(node_id: int) -> None:
     conn = get_connection()
+    # Explicitly delete connections first (fallback for missing CASCADE)
+    conn.execute("DELETE FROM Connections WHERE source_node_id = ? OR target_node_id = ?", (node_id, node_id))
     conn.execute("DELETE FROM Placed_Nodes WHERE id = ?", (node_id,))
     conn.commit()
 
@@ -261,6 +263,55 @@ def delete_project(project_id: int) -> None:
     conn = get_connection()
     # Cascading delete will handle nodes and connections
     conn.execute("DELETE FROM Projects WHERE id = ?", (project_id,))
+    conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Groups
+# ---------------------------------------------------------------------------
+
+def get_all_groups(project_id: int) -> list[dict]:
+    rows = get_connection().execute("SELECT * FROM Groups WHERE project_id = ?", (project_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+def get_group_by_id(group_id: int) -> dict | None:
+    row = get_connection().execute("SELECT * FROM Groups WHERE id = ?", (group_id,)).fetchone()
+    return dict(row) if row else None
+
+def add_group(project_id: int, name: str, x: float = 0, y: float = 0) -> int:
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO Groups (project_id, name, pos_x, pos_y) VALUES (?, ?, ?, ?)",
+        (project_id, name, x, y)
+    )
+    conn.commit()
+    return cur.lastrowid
+
+def update_group_pos(group_id: int, x: float, y: float) -> None:
+    conn = get_connection()
+    conn.execute("UPDATE Groups SET pos_x = ?, pos_y = ? WHERE id = ?", (x, y, group_id))
+    conn.commit()
+
+def update_group_collapse(group_id: int, collapsed: bool) -> None:
+    conn = get_connection()
+    conn.execute("UPDATE Groups SET is_collapsed = ? WHERE id = ?", (1 if collapsed else 0, group_id))
+    conn.commit()
+
+def rename_group(group_id: int, new_name: str) -> None:
+    conn = get_connection()
+    conn.execute("UPDATE Groups SET name = ? WHERE id = ?", (new_name, group_id))
+    conn.commit()
+
+def delete_group(group_id: int) -> None:
+    conn = get_connection()
+    # Explicitly clear group_id from nodes (fallback for missing SET NULL)
+    conn.execute("UPDATE Placed_Nodes SET group_id = NULL WHERE group_id = ?", (group_id,))
+    conn.execute("DELETE FROM Groups WHERE id = ?", (group_id,))
+    conn.commit()
+
+def set_node_group(node_id: int, group_id: int | None) -> None:
+    conn = get_connection()
+    conn.execute("UPDATE Placed_Nodes SET group_id = ? WHERE id = ?", (group_id, node_id))
     conn.commit()
 
 # ---------------------------------------------------------------------------

@@ -38,6 +38,9 @@ class FactoryScene(QGraphicsScene):
         # Runtime state shared across nodes/lines
         self._machines: list  = []   # all MachineNode instances
         self._connections: list = []  # all ConnectionLine instances
+        self._groups: list = []      # all SubFactoryNode instances
+
+        self.project_id = 1 # updated by MainWindow
 
         # Drag-to-connect temporary state
         self._temp_line = None        # TempConnectionLine | None
@@ -46,8 +49,11 @@ class FactoryScene(QGraphicsScene):
         # Visual settings
         self.line_style = "rounded"   # "rounded" | "straight"
 
-        # Copy/Paste clipboard — stores both 'nodes' and 'connections'
-        self._clipboard: dict = {"nodes": [], "connections": []}
+        # Copy/Paste clipboard — stores 'nodes', 'connections', and 'groups'
+        self._clipboard: dict = {"nodes": [], "connections": [], "groups": []}
+        
+        # Redraw foreground when selection changes
+        self.selectionChanged.connect(self.update)
 
     def set_line_style(self, style: str) -> None:
         """Update the connection line style and refresh all lines."""
@@ -94,9 +100,10 @@ class FactoryScene(QGraphicsScene):
                 # Determine material from output recipe
                 src_node = self._drag_src_port.parent_node
                 mat_id = None
-                if src_node.current_recipe_id is not None:
+                rid = getattr(src_node, "recipe_id", None)
+                if rid is not None:
                     from database.crud import get_recipe_by_id
-                    recipe = get_recipe_by_id(src_node.current_recipe_id)
+                    recipe = get_recipe_by_id(rid)
                     if recipe and "materials" in recipe:
                         # Find the first output component
                         outputs = [m for m in recipe["materials"] if not m["is_input"]]
@@ -139,6 +146,12 @@ class FactoryScene(QGraphicsScene):
             self._connections.remove(line)
         self.removeItem(line)
 
+    def remove_group(self, group) -> None:
+        """Correctly remove a group from the scene and internal tracking."""
+        if group in self._groups:
+            self._groups.remove(group)
+        self.removeItem(group)
+
     def all_nodes(self):
         return list(self._machines)
 
@@ -161,6 +174,31 @@ class FactoryScene(QGraphicsScene):
             event.accept()
         else:
             super().mouseReleaseEvent(event)
+
+    def drawForeground(self, painter, rect):
+        """Draw a dashed bounding box around multiple selected items."""
+        super().drawForeground(painter, rect)
+        
+        from ui.machine_node import MachineNode
+        from ui.sub_factory_node import SubFactoryNode
+        
+        # Filter selected items that are still in a scene
+        selected = [i for i in self.selectedItems() if i.scene() and isinstance(i, (MachineNode, SubFactoryNode))]
+        if len(selected) >= 2:
+            # Calculate total bounding box in scene coords
+            rects = [s.sceneBoundingRect() for s in selected]
+            if not rects: return
+            
+            min_x = min(r.left() for r in rects)
+            min_y = min(r.top() for r in rects)
+            max_x = max(r.right() for r in rects)
+            max_y = max(r.bottom() for r in rects)
+            
+            total_rect = QRectF(min_x, min_y, max_x - min_x, max_y - min_y).adjusted(-10, -10, 10, 10)
+            
+            painter.setPen(QPen(QColor("#ff9a00"), 1.5, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(total_rect)
 
     # ------------------------------------------------------------------
     # Engine recalculation (called after any topology change)
@@ -186,7 +224,7 @@ class FactoryScene(QGraphicsScene):
         result = calculate_production(graph, recipes, machines, materials)
 
         for node in self._machines:
-            lookup_id = node.node_db_id or id(node)
+            lookup_id = node.db_id or id(node)
             nr = result.nodes.get(lookup_id)
             if nr:
                 node.apply_result(nr)
@@ -202,8 +240,8 @@ class FactoryScene(QGraphicsScene):
             src_node = conn.src_port.parent_node
             tgt_node = conn.tgt_port.parent_node
             mismatch = False
-            src_rid = src_node.current_recipe_id
-            tgt_rid = tgt_node.current_recipe_id
+            src_rid = getattr(src_node, "recipe_id", None)
+            tgt_rid = getattr(tgt_node, "recipe_id", None)
             if src_rid and tgt_rid:
                 src_r = recipe_map.get(src_rid)
                 tgt_r = recipe_map.get(tgt_rid)
@@ -215,6 +253,48 @@ class FactoryScene(QGraphicsScene):
             conn.set_mismatch(mismatch)
 
     # ------------------------------------------------------------------
+    # Grouping Logic
+    # ------------------------------------------------------------------
+    def group_selection(self) -> None:
+        """Encapsulate selected MachineNodes into a new SubFactoryNode."""
+        from ui.machine_node import MachineNode
+        from ui.sub_factory_node import SubFactoryNode
+        from database.crud import add_group, set_node_group
+        
+        selected = [i for i in self.selectedItems() if isinstance(i, MachineNode)]
+        if len(selected) < 2:
+            return
+            
+        # Calculate bounding box for initial placement
+        rects = [m.sceneBoundingRect() for m in selected]
+        min_x = min(r.left() for r in rects)
+        min_y = min(r.top() for r in rects)
+        max_x = max(r.right() for r in rects)
+        max_y = max(r.bottom() for r in rects)
+        cx, cy = (min_x + max_x)/2, (min_y + max_y)/2
+        
+        group_id = add_group(self.project_id, "New Group", cx, cy)
+        
+        for n in selected:
+            n.group_id = group_id
+            set_node_group(n.db_id, group_id)
+            
+        group_data = {
+            "id": group_id,
+            "name": "New Group",
+            "pos_x": cx,
+            "pos_y": cy,
+            "is_collapsed": 0
+        }
+        sub_node = SubFactoryNode(group_data, self, selected)
+        self.addItem(sub_node)
+        self._groups.append(sub_node)
+        
+        self.clearSelection()
+        sub_node.setSelected(True)
+        self.recalculate()
+
+    # ------------------------------------------------------------------
     # Copy / Paste Logic
     # ------------------------------------------------------------------
     def _copy_selection(self) -> None:
@@ -222,8 +302,11 @@ class FactoryScene(QGraphicsScene):
         from ui.machine_node import MachineNode
         from ui.connection_line import ConnectionLine
         
-        self._clipboard = {"nodes": [], "connections": []}
+        self._clipboard = {"nodes": [], "connections": [], "groups": []}
         selected_nodes = []
+        
+        # Mapping for groups
+        from ui.sub_factory_node import SubFactoryNode
         
         # 1. Collect nodes
         for item in self.selectedItems():
@@ -232,8 +315,15 @@ class FactoryScene(QGraphicsScene):
                 self._clipboard["nodes"].append({
                     "id": id(item),  # Internal ref for connection mapping
                     "machine_data": item.machine_data,
-                    "recipe_id": item.current_recipe_id,
-                    "clock_speed": item.clock_speed,
+                    "recipe_id": item.recipe_id,
+                    "clock_speed": item._clock_speed,
+                    "pos": item.pos()
+                })
+            elif isinstance(item, SubFactoryNode):
+                self._clipboard["groups"].append({
+                    "name": item.name,
+                    "is_collapsed": item.is_collapsed,
+                    "member_ids": [id(m) for m in item.members],
                     "pos": item.pos()
                 })
         
@@ -307,6 +397,43 @@ class FactoryScene(QGraphicsScene):
                     src_port.connections.append(line)
                     tgt_port.connections.append(line)
                     line.setSelected(True)
+
+        # 3. Paste/Reconstruct Groups
+        from ui.sub_factory_node import SubFactoryNode
+        from database.crud import add_group, set_node_group
+        
+        for gdata in self._clipboard.get("groups", []):
+            new_pos = gdata["pos"] + offset
+            
+            # Find new machine instances that correspond to old member IDs
+            new_members = []
+            for m_id in gdata["member_ids"]:
+                if m_id in old_to_new_node:
+                    new_members.append(old_to_new_node[m_id])
+            
+            if new_members:
+                # Add to DB
+                gid = add_group(self.project_id, gdata["name"], new_pos.x(), new_pos.y())
+                for m in new_members:
+                    m.group_id = gid
+                    set_node_group(m.db_id, gid)
+                
+                # Create visual group
+                sub_node = SubFactoryNode({
+                    "id": gid,
+                    "name": gdata["name"],
+                    "pos_x": new_pos.x(),
+                    "pos_y": new_pos.y(),
+                    "is_collapsed": gdata["is_collapsed"]
+                }, self, new_members)
+                self.addItem(sub_node)
+                self._groups.append(sub_node)
+                sub_node.setSelected(True)
+                
+                if gdata["is_collapsed"]:
+                    sub_node._create_proxy_ports()
+            
+            gdata["pos"] = new_pos
 
         self.recalculate()
 
@@ -456,22 +583,65 @@ class FactoryView(QGraphicsView):
 
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             scene = self.scene()
-            # Collect selected nodes and connections (copy list — deletion mutates it)
+            # Collect selected items that support deletion
             from ui.machine_node import MachineNode
+            from ui.sub_factory_node import SubFactoryNode
             from ui.connection_line import ConnectionLine
-            selected_nodes = [
-                item for item in scene.selectedItems()
-                if isinstance(item, MachineNode)
-            ]
-            selected_conns = [
-                item for item in scene.selectedItems()
-                if isinstance(item, ConnectionLine)
-            ]
-            # Delete connections first, then nodes
-            for conn in selected_conns:
-                conn._delete_self()
-            for node in selected_nodes:
-                node._delete_self()
+            
+            selected_items = scene.selectedItems()
+            
+            # 1. Delete connections first
+            for item in list(selected_items):
+                if isinstance(item, ConnectionLine):
+                    item._delete_self()
+            
+            # 2. Delete nodes (Machines and Groups)
+            for item in list(selected_items):
+                if isinstance(item, (MachineNode, SubFactoryNode)):
+                    item._delete_self()
+            
             event.accept()
         else:
             super().keyPressEvent(event)
+    def contextMenuEvent(self, event) -> None:
+        from ui.machine_node import MachineNode
+        from ui.sub_factory_node import SubFactoryNode
+        from PySide6.QtWidgets import QMenu
+        from PySide6.QtGui import QAction, QPainterPath
+        
+        pos = event.pos()
+        scene_pos = self.mapToScene(pos)
+        item = self.itemAt(pos)
+        
+        menu = QMenu(self)
+        
+        # If right-clicking selection or nodes
+        selected = [i for i in self.scene().selectedItems() if isinstance(i, MachineNode)]
+        
+        if len(selected) >= 2:
+            act_group = QAction("📦 Group Selected Nodes", self)
+            act_group.triggered.connect(self.scene().group_selection)
+            menu.addAction(act_group)
+            menu.addSeparator()
+
+        if item:
+            if isinstance(item, SubFactoryNode):
+                # SubFactoryNode has its own context menu logic, but we can add more here
+                pass
+            
+            # Global actions
+            act_del = QAction("❌ Delete", self)
+            act_del.setShortcut("Del")
+            # Reuse logic from keyPressEvent — use static list to avoid mutation issues
+            def _delete():
+                items = list(self.scene().selectedItems())
+                for i in items:
+                    if i.scene() and hasattr(i, "_delete_self"): 
+                        i._delete_self()
+            act_del.triggered.connect(_delete)
+            menu.addAction(act_del)
+
+        if menu.actions():
+            menu.exec(event.globalPos())
+        else:
+            super().contextMenuEvent(event)
