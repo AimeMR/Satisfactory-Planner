@@ -7,7 +7,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QListWidget, QListWidgetItem, QLabel, QSplitter,
-    QStatusBar, QFrame,
+    QStatusBar, QFrame, QComboBox,
 )
 from PySide6.QtCore    import Qt, QPointF
 from PySide6.QtGui     import QColor, QFont, QIcon
@@ -51,15 +51,27 @@ class MainWindow(QMainWindow):
         self._sidebar = self._build_sidebar()
 
         # Splitter: sidebar | canvas
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(self._sidebar)
-        splitter.addWidget(self.view)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([220, 1180])
-        splitter.setHandleWidth(1)
+        layout_splitter = QSplitter(Qt.Horizontal)
+        layout_splitter.addWidget(self._sidebar)
+        layout_splitter.addWidget(self.view)
+        layout_splitter.setStretchFactor(0, 0)
+        layout_splitter.setStretchFactor(1, 1)
+        layout_splitter.setSizes([220, 1180])
+        layout_splitter.setHandleWidth(1)
 
-        self.setCentralWidget(splitter)
+        # Toolbar (Top)
+        self._toolbar = self._build_toolbar()
+        
+        # Main vertical layout to hold toolbar + splitter
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        main_layout.addWidget(self._toolbar)
+        main_layout.addWidget(layout_splitter)
+        
+        container = QWidget()
+        container.setLayout(main_layout)
+        self.setCentralWidget(container)
 
         # Status bar
         self._status = QStatusBar()
@@ -88,6 +100,61 @@ class MainWindow(QMainWindow):
             QScrollBar::handle {{ background: {_BORDER}; border-radius: 4px; }}
             QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
         """)
+
+    def _build_toolbar(self) -> QWidget:
+        bar = QWidget()
+        bar.setFixedHeight(50)
+        bar.setStyleSheet(f"""
+            QWidget {{ 
+                background: {_SIDEBAR_BG}; 
+                border-bottom: 1px solid {_BORDER};
+            }}
+        """)
+        
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(20, 0, 20, 0)
+        layout.setSpacing(15)
+        
+        # Title/Logo area
+        title = QLabel("SATISFACTORY PLANNER")
+        title.setStyleSheet(f"color: {_ACCENT}; font-weight: bold; font-size: 14px; letter-spacing: 1px;")
+        layout.addWidget(title)
+        
+        layout.addStretch()
+        
+        # Line Style Dropdown
+        style_label = QLabel("LINE STYLE:")
+        style_label.setStyleSheet("color: #888; font-size: 11px; font-weight: bold;")
+        layout.addWidget(style_label)
+        
+        self.style_combo = QComboBox()
+        self.style_combo.addItems(["Rounded (Bezier)", "Straight", "Orthogonal (Manhattan)"])
+        self.style_combo.setFixedWidth(180)
+        self.style_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: {_SIDEBAR_ITEM};
+                border: 1px solid {_BORDER};
+                border-radius: 4px;
+                padding: 5px 10px;
+                color: white;
+            }}
+            QComboBox::drop-down {{ border: none; }}
+            QComboBox QAbstractItemView {{
+                background: {_SIDEBAR_BG};
+                selection-background-color: {_SIDEBAR_ITEM};
+                border: 1px solid {_BORDER};
+            }}
+        """)
+        self.style_combo.currentIndexChanged.connect(self._on_style_changed)
+        layout.addWidget(self.style_combo)
+        
+        return bar
+
+    def _on_style_changed(self, index: int) -> None:
+        style_map = {0: "rounded", 1: "straight", 2: "orthogonal"}
+        style = style_map.get(index, "rounded")
+        self.scene.set_line_style(style)
+        self._update_status()
 
     def _build_sidebar(self) -> QWidget:
         container = QWidget()

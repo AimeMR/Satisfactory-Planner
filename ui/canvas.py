@@ -42,9 +42,20 @@ class FactoryScene(QGraphicsScene):
         # Drag-to-connect temporary state
         self._temp_line = None        # TempConnectionLine | None
         self._drag_src_port = None    # PortItem | None
+        
+        # Visual settings
+        self.line_style = "rounded"   # "rounded" | "straight"
 
         # Copy/Paste clipboard — stores both 'nodes' and 'connections'
         self._clipboard: dict = {"nodes": [], "connections": []}
+
+    def set_line_style(self, style: str) -> None:
+        """Update the connection line style and refresh all lines."""
+        if style not in ("rounded", "straight", "orthogonal"):
+            return
+        self.line_style = style
+        for conn in self._connections:
+            conn.update_path()
 
     # ------------------------------------------------------------------
     # Drag-to-connect (initiated by PortItem.mousePressEvent)

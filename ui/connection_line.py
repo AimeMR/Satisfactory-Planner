@@ -109,11 +109,24 @@ class ConnectionLine(QGraphicsPathItem):
         p1 = self.src_port.center_scene_pos()
         p2 = self.tgt_port.center_scene_pos()
 
-        ctrl1 = QPointF(p1.x() + _CTRL_OFFSET, p1.y())
-        ctrl2 = QPointF(p2.x() - _CTRL_OFFSET, p2.y())
-
         path = QPainterPath(p1)
-        path.cubicTo(ctrl1, ctrl2, p2)
+        
+        style = "rounded"
+        if self.scene() and hasattr(self.scene(), "line_style"):
+            style = self.scene().line_style
+            
+        if style == "straight":
+            path.lineTo(p2)
+        elif style == "orthogonal":
+            # 2-segment "L" path (Vertical -> Horizontal) - Exactly 1 curve
+            path.lineTo(p1.x(), p2.y())
+            path.lineTo(p2)
+        else:
+            # Rounded / Curved (Bezier)
+            ctrl1 = QPointF(p1.x() + _CTRL_OFFSET, p1.y())
+            ctrl2 = QPointF(p2.x() - _CTRL_OFFSET, p2.y())
+            path.cubicTo(ctrl1, ctrl2, p2)
+            
         self.setPath(path)
 
         # Update pen based on material type + status
