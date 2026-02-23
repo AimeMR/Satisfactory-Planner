@@ -166,6 +166,7 @@ class MachineNode(QGraphicsItem):
         for i in range(count):
             y = _BODY_Y + spacing * (i + 1)
             port = PortItem(ptype, self, self, index=i, side=side)
+            port.setPos(x, y)
             ports.append(port)
         return ports
 
@@ -307,26 +308,33 @@ class MachineNode(QGraphicsItem):
             painter.setFont(stat_font)
 
             y = header_h + 8 if self.is_logistics else 84
-
+            
+            from database.crud import get_setting
+            show_output = get_setting("show_output", "true") == "true"
+            show_power  = get_setting("show_power", "true") == "true"
+            show_inputs = get_setting("show_inputs", "true") == "true"
 
             # Output velocity
-            out_color = QColor("#aaffaa") if self._status == "ok" else QColor("#ffaaaa")
-            painter.setPen(QPen(out_color))
-            painter.drawText(QRectF(10, y, self.w - 20, 16),
-                             Qt.AlignVCenter | Qt.AlignLeft,
-                             f"OUT: {self._output_rate:.1f}{tr('items_min_short')}")
+            if show_output:
+                out_color = QColor("#aaffaa") if self._status == "ok" else QColor("#ffaaaa")
+                painter.setPen(QPen(out_color))
+                painter.drawText(QRectF(10, y, self.w - 20, 16),
+                                 Qt.AlignVCenter | Qt.AlignLeft,
+                                 f"OUT: {self._output_rate:.1f}{tr('items_min_short')}")
+                y += 16
 
             # Energy
-            y += 16
-            energy_mw = self._calc_energy_mw()
-            painter.setPen(QPen(QColor("#ffd54f")))
-            painter.drawText(QRectF(10, y, self.w - 20, 16),
-                             Qt.AlignVCenter | Qt.AlignLeft,
-                             f"⚡ {energy_mw:.1f} MW")
+            if show_power:
+                energy_mw = self._calc_energy_mw()
+                painter.setPen(QPen(QColor("#ffd54f")))
+                painter.drawText(QRectF(10, y, self.w - 20, 16),
+                                 Qt.AlignVCenter | Qt.AlignLeft,
+                                 f"⚡ {energy_mw:.1f} MW")
+                y += 16
 
             # ── Inputs Section (with separator line) ─────────────────────
-            if self._inputs:
-                y += 20
+            if show_inputs and self._inputs:
+                y += 4
                 painter.setPen(QPen(QColor("#44446a"), 1))
                 painter.drawLine(10, y, self.w - 10, y)
                 y += 6

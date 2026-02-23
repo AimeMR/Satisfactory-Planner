@@ -200,6 +200,13 @@ class ConnectionLine(QGraphicsPathItem):
         return QColor("#555577")
 
     def _update_label(self) -> None:
+        from database.crud import get_setting
+        show_belts = get_setting("show_belts", "true") == "true"
+        
+        if not show_belts:
+            self._label.setVisible(False)
+            return
+
         if self._material_mismatch:
             html = f"<span style='color:#ff1744; font-weight:bold;'>{tr('mat_mismatch')}</span>"
         elif self._mat_name:
@@ -209,8 +216,12 @@ class ConnectionLine(QGraphicsPathItem):
         else:
             html = ""
         
-        if self._label.toHtml() != html:
-            self._label.setHtml(html)
+        if not html:
+            self._label.setVisible(False)
+        else:
+            self._label.setVisible(True)
+            if self._label.toHtml() != html:
+                self._label.setHtml(html)
 
     # ------------------------------------------------------------------
     # Hover highlight

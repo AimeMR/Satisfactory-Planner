@@ -7,7 +7,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QTreeWidget, QTreeWidgetItem, QLabel, QSplitter,
-    QStatusBar, QFrame, QComboBox, QPushButton,
+    QStatusBar, QFrame, QComboBox, QPushButton, QCheckBox,
 )
 from PySide6.QtCore    import Qt, QPointF
 from PySide6.QtGui     import QColor, QFont, QIcon
@@ -85,11 +85,15 @@ class MainWindow(QMainWindow):
         # Status bar
         self._status = QStatusBar()
         self._status.setStyleSheet(f"background:{_SIDEBAR_BG}; color:{_TEXT}; font-size:12px;")
-        self.setStatusBar(self._status)
-        self._status.showMessage("Ready — right-drag to pan, scroll to zoom, double-click a machine to place")
+        self._status.showMessage("Ready — right-drag to pan, scroll: zoom, double-click: place")
 
         # Load any persisted layout from DB
         self._load_layout()
+
+        # Info Visibility Micro-Menu (Floating Bottom Left)
+        self._info_menu = self._build_info_menu()
+        self._info_menu.setParent(self)
+        self._info_menu.show()
 
     # ------------------------------------------------------------------
     # Sidebar builder
@@ -480,8 +484,95 @@ class MainWindow(QMainWindow):
         self.import_proj_btn.setToolTip(tr("import_proj"))
         self.delete_proj_btn.setToolTip(tr("delete_proj_title"))
         
+        # Refresh info menu strings
+        self.info_header.setText(tr("show_info"))
+        self.check_power.setText(tr("info_power"))
+        self.check_inputs.setText(tr("info_inputs"))
+        self.check_output.setText(tr("info_output"))
+        self.check_belts.setText(tr("info_belts"))
+        
         self._update_status()
         self._status.showMessage(f"Language switched to {new_lang.upper()}", 3000)
+
+    def _build_info_menu(self) -> QFrame:
+        from ui.i18n import tr
+        from database.crud import get_setting
+        
+        frame = QFrame()
+        frame.setObjectName("InfoMenu")
+        frame.setFixedWidth(180)
+        # Style: Glassmorphism / Dark Translucent
+        frame.setStyleSheet(f"""
+            QFrame#InfoMenu {{
+                background: rgba(15, 52, 96, 220);
+                border: 1px solid {_BORDER};
+                border-top-left-radius: 12px;
+            }}
+            QLabel {{ 
+                color: {_ACCENT}; 
+                font-weight: bold; 
+                font-size: 10px; 
+                letter-spacing: 0.5px;
+                padding-bottom: 2px;
+                border-bottom: 1px solid rgba(233, 69, 96, 50);
+            }}
+            QCheckBox {{ color: white; font-size: 11px; padding: 2px; }}
+            QCheckBox::indicator {{ width: 14px; height: 14px; border-radius: 3px; border: 1px solid {_BORDER}; background: #16213e; }}
+            QCheckBox::indicator:checked {{ background: {_ACCENT}; border-color: {_ACCENT}; }}
+        """)
+        
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+        layout.setSizeConstraint(QVBoxLayout.SetFixedSize)
+        
+        self.info_header = QLabel(tr("show_info"))
+        layout.addWidget(self.info_header)
+        
+        # Checkboxes
+        self.check_power  = QCheckBox(tr("info_power"))
+        self.check_inputs = QCheckBox(tr("info_inputs"))
+        self.check_output = QCheckBox(tr("info_output"))
+        self.check_belts  = QCheckBox(tr("info_belts"))
+        
+        # Load states
+        from database.crud import get_setting
+        self.check_power.setChecked(get_setting("show_power", "true") == "true")
+        self.check_inputs.setChecked(get_setting("show_inputs", "true") == "true")
+        self.check_output.setChecked(get_setting("show_output", "true") == "true")
+        self.check_belts.setChecked(get_setting("show_belts", "true") == "true")
+        
+        # Connect signals (Use clicked to ensure it only reacts to user)
+        self.check_power.clicked.connect(lambda: self._on_info_toggle("show_power", self.check_power.isChecked()))
+        self.check_inputs.clicked.connect(lambda: self._on_info_toggle("show_inputs", self.check_inputs.isChecked()))
+        self.check_output.clicked.connect(lambda: self._on_info_toggle("show_output", self.check_output.isChecked()))
+        self.check_belts.clicked.connect(lambda: self._on_info_toggle("show_belts", self.check_belts.isChecked()))
+        
+        layout.addWidget(self.check_power)
+        layout.addWidget(self.check_inputs)
+        layout.addWidget(self.check_output)
+        layout.addWidget(self.check_belts)
+        
+        return frame
+
+    def _on_info_toggle(self, key: str, val: bool) -> None:
+        from database.crud import set_setting
+        set_setting(key, "true" if val else "false")
+        # Force redraw of machine nodes and connections
+        self.scene.update()
+        for conn in self.scene.all_connections():
+             conn._update_label() # Explicitly update connection labels
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        # Reposition floating menu to bottom right
+        if hasattr(self, "_info_menu"):
+            # Put it above status bar
+            sb_h = self.statusBar().height() if self.statusBar() else 30
+            self._info_menu.move(
+                self.width() - self._info_menu.width(), 
+                self.height() - self._info_menu.height() - sb_h
+            )
 
     def _build_sidebar(self) -> QWidget:
         container = QWidget()
