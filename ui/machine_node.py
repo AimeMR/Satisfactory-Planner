@@ -127,35 +127,35 @@ class MachineNode(QGraphicsItem):
         
         if "Splitter" in name:
             # 1 Input (Left: idx 0) -> 3 Outputs (Top: idx 0, Right: idx 1, Bottom: idx 2)
-            self.input_ports = [self._make_directional_port("in", QPointF(0, self.h/2), index=0)]
+            self.input_ports = [self._make_directional_port("in", QPointF(0, self.h/2), index=0, side="left")]
             self.output_ports = [
-                self._make_directional_port("out", QPointF(self.w / 2, 0),      index=0), # Top
-                self._make_directional_port("out", QPointF(self.w, self.h / 2), index=1), # Right
-                self._make_directional_port("out", QPointF(self.w / 2, self.h), index=2), # Bottom
+                self._make_directional_port("out", QPointF(self.w / 2, 0),      index=0, side="top"),
+                self._make_directional_port("out", QPointF(self.w, self.h / 2), index=1, side="right"),
+                self._make_directional_port("out", QPointF(self.w / 2, self.h), index=2, side="bottom"),
             ]
         elif "Merger" in name:
             # 3 Inputs (Top: idx 0, Left: idx 1, Bottom: idx 2) -> 1 Output (Right: idx 0)
             self.input_ports = [
-                self._make_directional_port("in", QPointF(self.w / 2, 0),      index=0), # Top
-                self._make_directional_port("in", QPointF(0, self.h / 2),      index=1), # Left
-                self._make_directional_port("in", QPointF(self.w / 2, self.h), index=2), # Bottom
+                self._make_directional_port("in", QPointF(self.w / 2, 0),      index=0, side="top"),
+                self._make_directional_port("in", QPointF(0, self.h / 2),      index=1, side="left"),
+                self._make_directional_port("in", QPointF(self.w / 2, self.h), index=2, side="bottom"),
             ]
             self.output_ports = [
-                self._make_directional_port("out", QPointF(self.w, self.h / 2), index=0), # Right
+                self._make_directional_port("out", QPointF(self.w, self.h / 2), index=0, side="right"),
             ]
         else:
             # Standard machines
             n_in  = self.machine_data.get("inputs_allowed",  1)
             n_out = self.machine_data.get("outputs_allowed", 1)
-            self.input_ports  = self._make_standard_ports("in",  n_in,  x=0)
-            self.output_ports = self._make_standard_ports("out", n_out, x=self.w)
+            self.input_ports  = self._make_standard_ports("in",  n_in,  x=0,      side="left")
+            self.output_ports = self._make_standard_ports("out", n_out, x=self.w, side="right")
 
-    def _make_directional_port(self, ptype: str, pos: QPointF, index: int) -> PortItem:
-        port = PortItem(ptype, self, self, index=index)
+    def _make_directional_port(self, ptype: str, pos: QPointF, index: int, side: str) -> PortItem:
+        port = PortItem(ptype, self, self, index=index, side=side)
         port.setPos(pos)
         return port
 
-    def _make_standard_ports(self, ptype: str, count: int, x: float) -> list[PortItem]:
+    def _make_standard_ports(self, ptype: str, count: int, x: float, side: str) -> list[PortItem]:
         ports = []
         if count == 0:
             return ports
@@ -163,7 +163,7 @@ class MachineNode(QGraphicsItem):
         spacing = body_h / (count + 1)
         for i in range(count):
             y = _BODY_Y + spacing * (i + 1)
-            port = PortItem(ptype, self, self, index=i)
+            port = PortItem(ptype, self, self, index=i, side=side)
             port.setPos(x, y)
             ports.append(port)
         return ports

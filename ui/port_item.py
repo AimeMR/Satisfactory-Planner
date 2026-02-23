@@ -29,12 +29,13 @@ class PortItem(QGraphicsEllipseItem):
         connections:  List of ConnectionLine objects attached to this port.
     """
 
-    def __init__(self, port_type: str, parent_node, parent_item: QGraphicsItem, index: int = 0):
+    def __init__(self, port_type: str, parent_node, parent_item: QGraphicsItem, index: int = 0, side: str = "left"):
         r = _PORT_RADIUS
         super().__init__(-r, -r, r * 2, r * 2, parent_item)
         self.port_type   = port_type          # "in" or "out"
         self.parent_node = parent_node
         self.index       = index
+        self.side        = side               # "left", "right", "top", "bottom"
         self.connections: list = []           # ConnectionLine objects
 
         color = _OUT_COLOR if port_type == "out" else _IN_COLOR

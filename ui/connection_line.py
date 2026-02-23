@@ -118,8 +118,46 @@ class ConnectionLine(QGraphicsPathItem):
         if style == "straight":
             path.lineTo(p2)
         elif style == "orthogonal":
-            # 2-segment "L" path (Vertical -> Horizontal) - Exactly 1 curve
-            path.lineTo(p1.x(), p2.y())
+            # Manhattan path with stubs to avoid machine overlap
+            STUB = 20.0
+            
+            def get_stub(p, side):
+                if side == "left":   return QPointF(p.x() - STUB, p.y())
+                if side == "right":  return QPointF(p.x() + STUB, p.y())
+                if side == "top":    return QPointF(p.x(), p.y() - STUB)
+                if side == "bottom": return QPointF(p.x(), p.y() + STUB)
+                return p
+            
+            s1 = get_stub(p1, getattr(self.src_port, "side", "right"))
+            s2 = get_stub(p2, getattr(self.tgt_port, "side", "left"))
+            
+            path.lineTo(s1)
+            
+            # Midpoint-based routing between stubs
+            # If ports are on opposite sides (e.g. right -> left), use S-shape
+            # If they are perpendicular, use L-shape
+            src_side = getattr(self.src_port, "side", "right")
+            tgt_side = getattr(self.tgt_port, "side", "left")
+
+            if src_side in ["left", "right"] and tgt_side in ["left", "right"]:
+                # Horizontal ports: Step vertically at midpoint
+                mid_x = (s1.x() + s2.x()) / 2
+                path.lineTo(mid_x, s1.y())
+                path.lineTo(mid_x, s2.y())
+            elif src_side in ["top", "bottom"] and tgt_side in ["top", "bottom"]:
+                # Vertical ports: Step horizontally at midpoint
+                mid_y = (s1.y() + s2.y()) / 2
+                path.lineTo(s1.x(), mid_y)
+                path.lineTo(s2.x(), mid_y)
+            else:
+                # Perpendicular: Direct L between stubs
+                # If s1 is horizontal, move horizontally then vertically
+                if src_side in ["left", "right"]:
+                    path.lineTo(s2.x(), s1.y())
+                else:
+                    path.lineTo(s1.x(), s2.y())
+
+            path.lineTo(s2)
             path.lineTo(p2)
         else:
             # Rounded / Curved (Bezier)
