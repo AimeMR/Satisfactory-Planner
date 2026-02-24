@@ -4,7 +4,6 @@ Phase 2 — Application shell: sidebar + canvas + status bar.
 """
 
 from __future__ import annotations
-import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QTreeWidget, QTreeWidgetItem, QLabel, QSplitter,
@@ -800,11 +799,6 @@ class MainWindow(QMainWindow):
                     tgt_port.connections.append(line)
 
         if node_map:
-            # 3. Post-load: Initialize Proxy Ports for Collapsed Groups
-            # This must happen AFTER all nodes and connections are loaded
-            for group in self.scene._groups:
-                if group.is_collapsed:
-                    group._create_proxy_ports()
             self.scene.recalculate()
         self._update_status()
 
@@ -830,12 +824,6 @@ class MainWindow(QMainWindow):
         # 2. Map Groups
         group_id_map: dict[int, int] = {} # old_obj_id -> new_db_id
         for group in self.scene._groups:
-            # Safety check: skip if the C++ object was already deleted
-            try:
-                if not group.scene(): continue
-            except RuntimeError:
-                continue
-
             new_gid = add_group(
                 project_id=self.current_project_id,
                 name=group.name,

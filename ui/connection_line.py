@@ -280,14 +280,10 @@ class ConnectionLine(QGraphicsPathItem):
     # DB serialisation
     # ------------------------------------------------------------------
     def to_db_dict(self) -> dict:
-        # If ports are proxies, we must resolve back to the original machine ports
-        src_port = getattr(self.src_port, "original_port", self.src_port)
-        tgt_port = getattr(self.tgt_port, "original_port", self.tgt_port)
-        
         return {
             "id":             self.conn_db_id or id(self),
-            "source_node_id": getattr(src_port.parent_node, "db_id", None) or id(src_port.parent_node),
-            "target_node_id": getattr(tgt_port.parent_node, "db_id", None) or id(tgt_port.parent_node),
+            "source_node_id": getattr(self.src_port.parent_node, "db_id", None) or id(self.src_port.parent_node),
+            "target_node_id": getattr(self.tgt_port.parent_node, "db_id", None) or id(self.tgt_port.parent_node),
             "material_id":    self.material_id,
             "current_velocity": self._flow_rate,
         }

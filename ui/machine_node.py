@@ -261,10 +261,6 @@ class MachineNode(QGraphicsItem):
                         if g.group_id == self.group_id:
                             g.refresh_bounds()
                             break
-            
-            # Update scene if selected (to redraw orange selection box)
-            if self.isSelected() and self.scene():
-                self.scene().update()
                             
         return super().itemChange(change, value)
 
@@ -431,7 +427,7 @@ class MachineNode(QGraphicsItem):
         elif chosen == act_clock:
             self._change_clock_speed()
 
-    def _delete_self(self, recalculate: bool = True) -> None:
+    def _delete_self(self) -> None:
         from database.crud import delete_placed_node
         scene = self.scene()
         if scene is None:
@@ -446,16 +442,13 @@ class MachineNode(QGraphicsItem):
                     if g.group_id == self.group_id:
                         if self in g.members:
                             g.members.remove(self)
-                        # Avoid refresh_bounds during bulk deletion
-                        if hasattr(g, "_is_deleting") and not g._is_deleting:
-                            g.refresh_bounds()
+                        g.refresh_bounds()
                         break
 
         # 2. Remove all attached connections from scene
         for port in self.input_ports + self.output_ports:
-            # list() copy because _delete_self modifies port.connections
             for conn in list(port.connections):
-                conn._delete_self()
+                scene.remove_connection(conn)
         
         # 3. Delete from DB
         if self.db_id:
@@ -463,8 +456,7 @@ class MachineNode(QGraphicsItem):
 
         # 4. Remove from Scene
         scene.remove_machine_node(self)
-        if recalculate:
-            scene.recalculate()
+        scene.recalculate()
 
     def _change_clock_speed(self) -> None:
         from PySide6.QtWidgets import QInputDialog

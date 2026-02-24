@@ -32,13 +32,12 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
         
         self.proxy_ports = []
         self.connection_storage = {} # ConnectionLine -> (original_src, original_tgt, original_visible)
-        self._is_deleting = False # Guard for bulk deletion
         
     def boundingRect(self) -> QRectF:
         if self.is_collapsed:
             return QRectF(0, 0, self.w, self.h)
         else:
-            if not self.members or self._is_deleting:
+            if not self.members:
                 return QRectF(0, 0, 100, 100)
             
             # Use a cached version of member bounds to avoid self.pos() cycles
@@ -76,8 +75,6 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
 
     def refresh_bounds(self):
         """Called when a member machine moves, to update the group's visual box."""
-        if self._is_deleting:
-            return
         self.prepareGeometryChange()
         self.update()
 
@@ -89,8 +86,7 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
             
     def _draw_collapsed(self, painter):
         # Draw a sleek box (Glassmorphism style)
-        from PySide6.QtGui import QPainter
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(painter.Antialiasing)
         painter.setPen(QPen(QColor("#00d2ff"), 2))
         painter.setBrush(QBrush(QColor(0, 210, 255, 40)))
         
@@ -101,18 +97,10 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
         painter.setBrush(QBrush(QColor(0, 210, 255, 120)))
         painter.drawRoundedRect(QRectF(0, 0, self.w, 30), 12, 12)
         
-        # Toggle Button (+)
-        btn_rect = QRectF(10, 7, 16, 16)
-        painter.setPen(QPen(QColor("white"), 1.5))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRect(btn_rect)
-        painter.drawLine(14, 15, 22, 15) # Horizontal line
-        painter.drawLine(18, 11, 18, 19) # Vertical line
-        
-        # Title (offset to the right of the button)
+        # Title
         painter.setFont(QFont("Segoe UI", 10, QFont.Bold))
         painter.setPen(QColor("white"))
-        painter.drawText(QRectF(36, 0, self.w - 40, 30), Qt.AlignLeft | Qt.AlignVCenter, self.name)
+        painter.drawText(QRectF(0, 0, self.w, 30), Qt.AlignCenter, self.name)
         
         # Stats summary (placeholder)
         painter.setFont(QFont("Segoe UI", 8))
@@ -127,19 +115,12 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(self.boundingRect())
         
-        # Toggle Button (-)
-        brect = self.boundingRect()
-        btn_x, btn_y = brect.left() + 10, brect.top() + 7
-        btn_rect = QRectF(btn_x, btn_y, 16, 16)
-        painter.setPen(QPen(QColor("#00d2ff"), 1.5))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRect(btn_rect)
-        painter.drawLine(btn_x + 4, btn_y + 8, btn_x + 12, btn_y + 8) # Horizontal line
-        
-        # Label at top-left (offset to the right of the button)
+        # Label at top-left
         painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
         painter.setPen(QColor("#00d2ff"))
-        painter.drawText(QRectF(btn_x + 25, brect.top(), 300, 30), 
+        brect = self.boundingRect()
+        # Draw label at the top of the padding area
+        painter.drawText(QRectF(brect.left() + 5, brect.top(), 300, 30), 
                          Qt.AlignLeft | Qt.AlignVCenter, self.name.upper())
 
     def itemChange(self, change, value):
@@ -150,35 +131,9 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
                 # Move all members with the group
                 for m in self.members:
                     m.setPos(m.pos() + delta)
-                
-                # Sync connections attached to proxy ports
-                for p in self.proxy_ports:
-                    for c in p.connections:
-                        c.update_path()
-
                 self._last_pos = new_pos
-                
-                # Update scene if selected (to redraw orange selection box)
-                if self.isSelected() and self.scene():
-                    self.scene().update()
-                    
         return super().itemChange(change, value)
         
-    def mousePressEvent(self, event):
-        # Check if we clicked the toggle button
-        if self.is_collapsed:
-            btn_rect = QRectF(10, 7, 16, 16)
-        else:
-            brect = self.boundingRect()
-            btn_rect = QRectF(brect.left() + 10, brect.top() + 7, 16, 16)
-            
-        if event.button() == Qt.LeftButton and btn_rect.contains(event.pos()):
-            self._toggle_state()
-            event.accept()
-            return
-            
-        super().mousePressEvent(event)
-
     def contextMenuEvent(self, event):
         menu = QtWidgets.QMenu()
         toggle_txt = "Expand" if self.is_collapsed else "Collapse"
@@ -225,17 +180,7 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
 
     def _create_proxy_ports(self):
         """Find connections crossing the group boundary and re-route them."""
-        # Clean up existing state if any (making it idempotent)
-        for p in self.proxy_ports:
-            if self.scene():
-                self.scene().removeItem(p)
-        self.proxy_ports.clear()
-        
-        # NOTE: We keep connection_storage for restoration, 
-        # but here we are establishing NEW proxying.
-        self.connection_storage.clear()
-
-        # self.members is a list of MachineNodes
+        # Note: self.members is a list of MachineNodes
         in_nodes = set(self.members)
         
         in_proxy_count = 0
@@ -279,16 +224,12 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
         # Re-link connection
         if ptype == "out":
             # conn.src_port was inside, now it's our proxy
-            original = conn.src_port
-            proxy.original_port = original # Track for persistence
-            original.connections.remove(conn)
+            conn.src_port.connections.remove(conn)
             conn.src_port = proxy
             proxy.connections.append(conn)
         else:
             # conn.tgt_port was inside, now it's our proxy
-            original = conn.tgt_port
-            proxy.original_port = original # Track for persistence
-            original.connections.remove(conn)
+            conn.tgt_port.connections.remove(conn)
             conn.tgt_port = proxy
             proxy.connections.append(conn)
             
@@ -297,35 +238,28 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
     def _restore_original_ports(self):
         """Return all connections to their original machine ports."""
         for conn, (old_src, old_tgt, old_vis) in self.connection_storage.items():
-            try:
-                # Remove from proxy if it was proxied
-                if conn.src_port in self.proxy_ports:
-                    conn.src_port.connections.remove(conn)
-                if conn.tgt_port in self.proxy_ports:
-                    conn.tgt_port.connections.remove(conn)
-                
-                # Restore ports
-                conn.src_port = old_src
-                conn.tgt_port = old_tgt
-                if conn not in old_src.connections:
-                    old_src.connections.append(conn)
-                if conn not in old_tgt.connections:
-                    old_tgt.connections.append(conn)
-                
-                # Restore visibility
-                conn.setVisible(old_vis)
-                conn.update_path()
-            except RuntimeError:
-                # Connection was already deleted
-                continue
+            # Remove from proxy if it was proxied
+            if conn.src_port in self.proxy_ports:
+                conn.src_port.connections.remove(conn)
+            if conn.tgt_port in self.proxy_ports:
+                conn.tgt_port.connections.remove(conn)
+            
+            # Restore ports
+            conn.src_port = old_src
+            conn.tgt_port = old_tgt
+            if conn not in old_src.connections:
+                old_src.connections.append(conn)
+            if conn not in old_tgt.connections:
+                old_tgt.connections.append(conn)
+            
+            # Restore visibility
+            conn.setVisible(old_vis)
+            conn.update_path()
             
         # Clean up
         for p in self.proxy_ports:
-            try:
-                if self.scene():
-                    self.scene().removeItem(p)
-            except RuntimeError:
-                pass
+            if self.scene():
+                self.scene().removeItem(p)
         self.proxy_ports.clear()
         self.connection_storage.clear()
         
@@ -340,41 +274,24 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
         if hasattr(self.factory_scene, "remove_group"):
             self.factory_scene.remove_group(self)
         else:
-            scene = self.scene() or self.factory_scene
-            if hasattr(scene, "removeItem"):
-                scene.removeItem(self)
-            if hasattr(scene, "_groups") and self in scene._groups:
-                scene._groups.remove(self)
+            if self.scene():
+                self.scene().removeItem(self)
         
         self.factory_scene.recalculate()
     def _delete_group_fully(self):
         """Delete this group and ALL machines inside it."""
         from database.crud import delete_group
-        print(f"[DEBUG] Full Group Deletion: ID={self.group_id}")
-        self._is_deleting = True
         
-        # Restore connections so machines can find them during deletion
-        if self.is_collapsed:
-            self._restore_original_ports()
-
         # 1. Delete all members using their own deletion logic (cleans up DB + scene)
-        # We use list() because members will be modified during iteration.
-        # We pass recalculate=False to avoid N engine runs.
-        machines_to_delete = list(self.members)
-        for m in machines_to_delete:
-            m._delete_self(recalculate=False)
+        # We use list() because members will be modified during iteration
+        for m in list(self.members):
+            m._delete_self()
         
-        # Clear members list now that they are gone
-        self.members.clear()
-
-        # 2. Delete the group itself from DB
+        # 2. Delete group from DB
         delete_group(self.group_id)
-
-        # 3. Remove from scene and internal tracking
+        
+        # 3. Remove from scene
         if hasattr(self.factory_scene, "remove_group"):
             self.factory_scene.remove_group(self)
         
-        if self.factory_scene:
-            self.factory_scene.recalculate()
-
-    _delete_self = _delete_group_fully
+        self.factory_scene.recalculate()
