@@ -129,6 +129,10 @@ class ConnectionLine(QGraphicsPathItem):
         self._mat_type:          str   = "solid"   # "solid" | "liquid" | "gas"
         self._material_mismatch: bool  = False      # source output != target input
 
+        # Original node refs — used when connection is proxied through a collapsed group
+        self._original_src_node = src_port.parent_node
+        self._original_tgt_node = tgt_port.parent_node
+
         # Fetch material type for colour
         if material_id is not None:
             self._load_material(material_id)
@@ -155,8 +159,11 @@ class ConnectionLine(QGraphicsPathItem):
     # ------------------------------------------------------------------
     def update_path(self) -> None:
         """Recompute the Bezier curve and reposition the label."""
-        p1 = self.src_port.center_scene_pos()
-        p2 = self.tgt_port.center_scene_pos()
+        try:
+            p1 = self.src_port.center_scene_pos()
+            p2 = self.tgt_port.center_scene_pos()
+        except RuntimeError:
+            return  # Port's C++ side already deleted
 
         path = QPainterPath(p1)
         
@@ -214,6 +221,7 @@ class ConnectionLine(QGraphicsPathItem):
             ctrl2 = QPointF(p2.x() - _CTRL_OFFSET, p2.y())
             path.cubicTo(ctrl1, ctrl2, p2)
             
+        self.prepareGeometryChange()
         self.setPath(path)
 
         # Update pen based on material type + status
@@ -248,8 +256,8 @@ class ConnectionLine(QGraphicsPathItem):
         return QColor("#555577")
 
     def _update_label(self) -> None:
-        from database.crud import get_setting
-        show_belts = get_setting("show_belts", "true") == "true"
+        from ui.settings_cache import get_cached_setting
+        show_belts = get_cached_setting("show_belts") == "true"
         
         if not show_belts:
             self._label.setVisible(False)
@@ -298,16 +306,24 @@ class ConnectionLine(QGraphicsPathItem):
         action_del = menu.addAction(tr("delete_conn"))
         chosen = menu.exec(event.screenPos())
         if chosen == action_del:
+            scene = self.scene()
             self._delete_self()
+            if scene:
+                scene.recalculate()
 
     def _delete_self(self) -> None:
         scene = self.scene()
         if scene is None:
             return
-        self.src_port.connections = [c for c in self.src_port.connections if c is not self]
-        self.tgt_port.connections = [c for c in self.tgt_port.connections if c is not self]
+        try:
+            self.src_port.connections = [c for c in self.src_port.connections if c is not self]
+        except RuntimeError:
+            pass
+        try:
+            self.tgt_port.connections = [c for c in self.tgt_port.connections if c is not self]
+        except RuntimeError:
+            pass
         scene.remove_connection(self)
-        scene.recalculate()
 
     # ------------------------------------------------------------------
     # Apply engine result
@@ -329,10 +345,13 @@ class ConnectionLine(QGraphicsPathItem):
     # DB serialisation
     # ------------------------------------------------------------------
     def to_db_dict(self) -> dict:
+        # Use original node refs (set at creation time) which survive proxy rerouting
+        src_node = self._original_src_node
+        tgt_node = self._original_tgt_node
         return {
             "id":             self.conn_db_id or id(self),
-            "source_node_id": getattr(self.src_port.parent_node, "db_id", None) or id(self.src_port.parent_node),
-            "target_node_id": getattr(self.tgt_port.parent_node, "db_id", None) or id(self.tgt_port.parent_node),
+            "source_node_id": getattr(src_node, "db_id", None) or id(src_node),
+            "target_node_id": getattr(tgt_node, "db_id", None) or id(tgt_node),
             "material_id":    self.material_id,
             "current_velocity": self._flow_rate,
         }

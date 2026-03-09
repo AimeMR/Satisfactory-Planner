@@ -13,11 +13,16 @@ from .crud import (
 
 def seed_db() -> None:
     """Seed all baseline game data. Safe to call multiple times."""
-    if not get_all_materials() or len(get_all_machines()) < 35:
+    from database.crud import get_setting, set_setting
+    current_version = get_setting("seed_version", "0")
+    SEED_VERSION = "3"  # Increment when seed data changes
+    
+    if current_version != SEED_VERSION:
         _seed_materials()
         _seed_machines()
         _seed_recipes()
         _seed_mining_recipes()
+        set_setting("seed_version", SEED_VERSION)
         print("[DB] Seed data inserted/updated successfully.")
     else:
         print("[DB] Seed data already present, skipping.")
@@ -95,22 +100,14 @@ def _seed_materials() -> None:
         ("Magnetic Field Generator", "solid"),
         ("Thermal Propulsion Rocket", "solid"),
         ("Biomass",         "solid"),
-        ("Heat Sink",        "solid"),
-        ("Cooling System",   "solid"),
-        ("Copper Powder",    "solid"), # used in Nuclear Pasta
-        ("Pressure Conversion Cube", "solid"),
         ("Electromagnetic Control Rod", "solid"),
-        ("Fused Modular Frame", "solid"),
         ("Non-Fissile Uranium", "solid"),
         ("Plutonium Pellet",  "solid"),
         ("Encased Plutonium Cell", "solid"),
         ("Plutonium Fuel Rod", "solid"),
         ("Uranium Fuel Rod",   "solid"),
         ("Encased Uranium Cell", "solid"),
-        # Project Parts Phase 4
-        ("Assembly Director System", "solid"),
-        ("Magnetic Field Generator", "solid"),
-        ("Thermal Propulsion Rocket", "solid"),
+        ("Aluminum Scrap",  "solid"),
         # Liquids / gases
         ("Water",          "liquid"),
         ("Crude Oil",      "liquid"),
@@ -119,7 +116,6 @@ def _seed_materials() -> None:
         ("Turbo Fuel",     "liquid"),
         ("Nitrogen Gas",   "gas"),
         ("Alumina Solution", "liquid"),
-        ("Aluminum Scrap",  "solid"), # Needs Alumina Solution + Coal
         ("Sulfuric Acid",  "liquid"),
         ("Nitric Acid",    "liquid"),
     ]
@@ -267,6 +263,7 @@ def _seed_recipes() -> None:
         ("Uranium Fuel Rod", "Manufacturer", [("Encased Uranium Cell", 20), ("Electromagnetic Control Rod", 1), ("Crystal Oscillator", 3)], [("Uranium Fuel Rod", 1)], 120.0),
         ("Non-Fissile Uranium", "Blender", [("Uranium Waste", 15), ("Silica", 10), ("Nitric Acid", 6), ("Sulfuric Acid", 6)], [("Non-Fissile Uranium", 20), ("Water", 6)], 12.0),
         ("Plutonium Pellet", "Particle Accelerator", [("Non-Fissile Uranium", 100), ("Uranium Waste", 25)], [("Plutonium Pellet", 30)], 60.0),
+        ("Encased Plutonium Cell", "Assembler", [("Plutonium Pellet", 2), ("Concrete", 4)], [("Encased Plutonium Cell", 1)], 12.0),
         ("Plutonium Fuel Rod", "Manufacturer", [("Encased Plutonium Cell", 30), ("Steel Beam", 18), ("Electromagnetic Control Rod", 6), ("Heat Sink", 10)], [("Plutonium Fuel Rod", 1)], 120.0),
     ]
 

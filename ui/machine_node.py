@@ -316,10 +316,10 @@ class MachineNode(QGraphicsItem):
 
             y = header_h + 8 if self.is_logistics else 76
             
-            from database.crud import get_setting
-            show_output = get_setting("show_output", "true") == "true"
-            show_power  = get_setting("show_power", "true") == "true"
-            show_inputs = get_setting("show_inputs", "true") == "true"
+            from ui.settings_cache import get_cached_setting
+            show_output = get_cached_setting("show_output") == "true"
+            show_power  = get_cached_setting("show_power") == "true"
+            show_inputs = get_cached_setting("show_inputs") == "true"
 
             # Output velocity
             if show_output:
@@ -379,15 +379,18 @@ class MachineNode(QGraphicsItem):
         from PySide6.QtGui import QAction
         menu = QMenu()
         menu.setStyleSheet(
-            "QMenu { background:#16213e; color:#eaeaea; border:1px solid #4a4a8a; }"
+            "QMenu { background:#16213e; color:#eaeaea; border:1px solid #4a4a8a; font-size:13px; }"
+            "QMenu::item { padding: 6px 20px; }"
             "QMenu::item:selected { background:#0f3460; }"
+            "QMenu::separator { height:1px; background:#4a4a8a; margin:4px 0; }"
         )
 
-        # ── Group Actions ──
+        # ── Group Actions (top-level, not in submenu) ──
+        group_node = None
+        act_toggle_grp = None
+        act_ungroup_grp = None
         if self.group_id is not None:
-            # Find the group object
             scene = self.scene()
-            group_node = None
             if hasattr(scene, "_groups"):
                 for g in scene._groups:
                     if g.group_id == self.group_id:
@@ -395,31 +398,27 @@ class MachineNode(QGraphicsItem):
                         break
             
             if group_node:
-                group_menu = menu.addMenu("📦 " + group_node.name)
-                
-                toggle_txt = "Expand" if group_node.is_collapsed else "Collapse"
-                act_toggle_grp = group_menu.addAction(toggle_txt)
-                act_ungroup_grp = group_menu.addAction("Ungroup")
-                
+                toggle_txt = "📂 Expand Group" if group_node.is_collapsed else "📁 Collapse Group"
+                act_toggle_grp = menu.addAction(toggle_txt)
+                act_ungroup_grp = menu.addAction("🔓 Disband Group")
                 menu.addSeparator()
 
-        act_clock = menu.addAction(f"🕒 Change Clock Speed ({self._clock_speed*100:.1f}%)")
+        act_clock = menu.addAction(f"🕒 Clock Speed ({self._clock_speed*100:.1f}%)")
         act_del   = menu.addAction("🗑 Delete Machine")
 
-        # In Qt, menu.exec expects a QPoint (global screen coordinates)
-        # event.screenPos() returns a QPoint in PyQt6/PySide6
         chosen = menu.exec(event.screenPos())
+        if not chosen:
+            return
 
-        if self.group_id is not None and group_node:
-            if chosen == act_toggle_grp:
-                group_node._toggle_state()
-                return
-            elif chosen == act_ungroup_grp:
-                group_node._ungroup()
-                return
-
-        if chosen == act_del:
+        if chosen == act_toggle_grp and group_node:
+            group_node._toggle_state()
+        elif chosen == act_ungroup_grp and group_node:
+            group_node._ungroup()
+        elif chosen == act_del:
+            scene = self.scene()
             self._delete_self()
+            if scene:
+                scene.recalculate()
         elif chosen == act_clock:
             self._change_clock_speed()
 
@@ -444,7 +443,10 @@ class MachineNode(QGraphicsItem):
         # 2. Remove all attached connections from scene
         for port in self.input_ports + self.output_ports:
             for conn in list(port.connections):
-                scene.remove_connection(conn)
+                try:
+                    conn._delete_self()
+                except RuntimeError:
+                    pass
         
         # 3. Delete from DB
         if self.db_id:
@@ -452,7 +454,6 @@ class MachineNode(QGraphicsItem):
 
         # 4. Remove from Scene
         scene.remove_machine_node(self)
-        scene.recalculate()
 
     def _change_clock_speed(self) -> None:
         from PySide6.QtWidgets import QInputDialog

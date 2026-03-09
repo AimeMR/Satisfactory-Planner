@@ -4,15 +4,33 @@ Phase 2 — Application shell: sidebar + canvas + status bar.
 """
 
 from __future__ import annotations
+import os
+import random
+import logging
+
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QTreeWidget, QTreeWidgetItem, QLabel, QSplitter,
     QStatusBar, QFrame, QComboBox, QPushButton, QCheckBox,
+    QInputDialog, QMessageBox, QFileDialog, QMenu,
 )
 from PySide6.QtCore    import Qt, QPointF
-from PySide6.QtGui     import QColor, QFont, QIcon
+from PySide6.QtGui     import QColor, QFont, QIcon, QAction
 
 from ui.canvas import FactoryScene, FactoryView
+from ui.i18n import tr, get_language, set_language
+from database.crud import (
+    get_setting, set_setting,
+    get_all_machines, get_all_projects, get_all_placed_nodes,
+    get_all_connections, get_all_groups,
+    get_machine_by_id, get_recipe_by_id, get_material_by_id,
+    add_project, add_placed_node, add_connection,
+    add_group, update_group_collapse,
+    rename_project, delete_project, delete_placed_node, delete_group,
+    set_node_group,
+)
+
+logger = logging.getLogger("satisfactory_planner")
 
 
 # Satisfactory-style palette
@@ -314,10 +332,12 @@ class MainWindow(QMainWindow):
         self.project_combo.clear()
         
         projects = get_all_projects()
+        found = False
         for p in projects:
             self.project_combo.addItem(p["name"], p["id"])
             if p["id"] == self.current_project_id:
                 self.project_combo.setCurrentIndex(self.project_combo.count() - 1)
+                found = True
         
         if self.project_combo.count() == 0:
             # Should not happen due to DB migration, but safety first
@@ -325,7 +345,15 @@ class MainWindow(QMainWindow):
             pid = add_project("Default Project")
             self.project_combo.addItem("Default Project", pid)
             self.current_project_id = pid
+            found = True
             
+        if not found and self.project_combo.count() > 0:
+            first_pid = self.project_combo.itemData(0)
+            self.current_project_id = first_pid
+            from database.crud import set_setting
+            set_setting("current_project_id", str(first_pid))
+            self.project_combo.setCurrentIndex(0)
+
         self.project_combo.blockSignals(False)
 
     def _on_project_changed(self, index: int) -> None:
@@ -442,9 +470,6 @@ class MainWindow(QMainWindow):
             self._update_status()
             self._status.showMessage(tr("project_deleted", proj_name), 3000)
 
-        if Action: # Note: This logic was from a previous partial implementation, let's fix it properly
-            pass
-
     def _on_toggle_language(self) -> None:
         from ui.i18n import get_language, set_language, tr
         new_lang = "es" if get_language() == "en" else "en"
@@ -557,8 +582,8 @@ class MainWindow(QMainWindow):
         return frame
 
     def _on_info_toggle(self, key: str, val: bool) -> None:
-        from database.crud import set_setting
-        set_setting(key, "true" if val else "false")
+        from ui.settings_cache import set_cached_setting
+        set_cached_setting(key, "true" if val else "false")
         # Force redraw of machine nodes and connections
         self.scene.update()
         for conn in self.scene.all_connections():
@@ -736,6 +761,8 @@ class MainWindow(QMainWindow):
         )
         from ui.machine_node import MachineNode
         from ui.connection_line import ConnectionLine
+        
+        self.scene.project_id = self.current_project_id
 
         # 0. Load Configuration
         saved_style = get_setting("line_style", "rounded")
@@ -750,16 +777,7 @@ class MainWindow(QMainWindow):
         node_map: dict[int, MachineNode] = {}  # db_id → MachineNode
         group_map: dict[int, SubFactoryNode] = {}
 
-        # 1. Load Groups
-        from database.crud import get_all_groups
-        from ui.sub_factory_node import SubFactoryNode
-        for gdata in get_all_groups(self.current_project_id):
-            sub_node = SubFactoryNode(gdata, self.scene)
-            self.scene.addItem(sub_node)
-            self.scene._groups.append(sub_node)
-            group_map[gdata["id"]] = sub_node
-
-        # 2. Load Nodes
+        # 1. Load Nodes FIRST (so we know which are in which group)
         for row in get_all_placed_nodes(self.current_project_id):
             machine = get_machine_by_id(row["machine_id"])
             if not machine:
@@ -772,14 +790,26 @@ class MainWindow(QMainWindow):
                                group_id=row.get("group_id"))
             self.scene.add_machine_node(node)
             node_map[row["id"]] = node
-            
-            # Link to group
-            gid = row.get("group_id")
-            if gid and gid in group_map:
-                group_node = group_map[gid]
-                group_node.members.append(node)
-                if group_node.is_collapsed:
-                    node.setVisible(False)
+
+        # 2. Load Groups (skip orphan groups that have no members)
+        from database.crud import get_all_groups
+        from ui.sub_factory_node import SubFactoryNode
+        for gdata in get_all_groups(self.current_project_id):
+            gid = gdata["id"]
+            # Find nodes that belong to this group
+            members = [n for n in node_map.values() if n.group_id == gid]
+            if not members:
+                # Orphan group — delete from DB and skip
+                from database.crud import delete_group
+                delete_group(gid)
+                continue
+            sub_node = SubFactoryNode(gdata, self.scene, members)
+            self.scene.addItem(sub_node)
+            self.scene._groups.append(sub_node)
+            group_map[gid] = sub_node
+            if sub_node.is_collapsed:
+                for m in members:
+                    m.setVisible(False)
 
         # 2. Load Connections for this project
         for row in get_all_connections(self.current_project_id):
@@ -826,48 +856,61 @@ class MainWindow(QMainWindow):
 
         # 2. Map Groups
         group_id_map: dict[int, int] = {} # old_obj_id -> new_db_id
-        for group in self.scene._groups:
-            new_gid = add_group(
-                project_id=self.current_project_id,
-                name=group.name,
-                x=group.pos().x(),
-                y=group.pos().y()
-            )
-            update_group_collapse(new_gid, group.is_collapsed)
-            group_id_map[id(group)] = new_gid
-            group.group_id = new_gid
+        for group in list(self.scene._groups):
+            try:
+                if not group.members:
+                    continue  # Don't save empty groups
+                new_gid = add_group(
+                    project_id=self.current_project_id,
+                    name=group.name,
+                    x=group.pos().x(),
+                    y=group.pos().y()
+                )
+                update_group_collapse(new_gid, group.is_collapsed)
+                group_id_map[id(group)] = new_gid
+                group.group_id = new_gid
+            except RuntimeError:
+                continue  # C++ object already deleted
 
         # 3. Map Nodes
         id_map: dict[int, int] = {}  # old_obj_id → new_db_id
         for node in self.scene.all_nodes():
-            # Find group_id if node belongs to a group
-            parent_group = next((g for g in self.scene._groups if node in g.members), None)
-            new_gid = group_id_map.get(id(parent_group)) if parent_group else None
-            
-            new_id = add_placed_node(
-                project_id=self.current_project_id,
-                machine_id=node._m_id,
-                recipe_id=node.recipe_id,
-                pos_x=node.pos().x(),
-                pos_y=node.pos().y(),
-                clock_speed=node._clock_speed,
-                group_id=new_gid
-            )
-            id_map[id(node)] = new_id
-            node.db_id = new_id
+            try:
+                # Find group_id if node belongs to a group
+                parent_group = next((g for g in self.scene._groups if node in g.members), None)
+                new_gid = group_id_map.get(id(parent_group)) if parent_group else None
+                
+                new_id = add_placed_node(
+                    project_id=self.current_project_id,
+                    machine_id=node._m_id,
+                    recipe_id=node.recipe_id,
+                    pos_x=node.pos().x(),
+                    pos_y=node.pos().y(),
+                    clock_speed=node._clock_speed,
+                    group_id=new_gid
+                )
+                id_map[id(node)] = new_id
+                node.db_id = new_id
+            except RuntimeError:
+                continue  # C++ object already deleted
 
         # 4. Map Connections
         for conn in self.scene.all_connections():
-            src_node = conn.src_port.parent_node
-            tgt_node = conn.tgt_port.parent_node
-            src_id = id_map.get(id(src_node))
-            tgt_id = id_map.get(id(tgt_node))
-            if src_id and tgt_id:
-                new_id = add_connection(
-                    source_node_id=src_id,
-                    target_node_id=tgt_id,
-                    source_port_idx=conn.src_port.index,
-                    target_port_idx=conn.tgt_port.index,
-                    material_id=conn.material_id,
-                )
-                conn.conn_db_id = new_id
+            try:
+                # Use original node refs (survives proxy rerouting)
+                src_node = conn._original_src_node
+                tgt_node = conn._original_tgt_node
+                src_id = id_map.get(id(src_node))
+                tgt_id = id_map.get(id(tgt_node))
+                if src_id and tgt_id:
+                    new_id = add_connection(
+                        source_node_id=src_id,
+                        target_node_id=tgt_id,
+                        source_port_idx=getattr(conn.src_port, 'index', 0),
+                        target_port_idx=getattr(conn.tgt_port, 'index', 0),
+                        material_id=conn.material_id,
+                    )
+                    conn.conn_db_id = new_id
+            except RuntimeError:
+                continue  # C++ object already deleted
+

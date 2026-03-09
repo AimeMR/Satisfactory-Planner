@@ -132,7 +132,10 @@ class FactoryScene(QGraphicsScene):
     def remove_machine_node(self, node) -> None:
         if node in self._machines:
             self._machines.remove(node)
-        self.removeItem(node)
+        try:
+            self.removeItem(node)
+        except RuntimeError:
+            pass  # C++ object already deleted
 
     def add_connection(self, line) -> None:
         self._connections.append(line)
@@ -141,13 +144,19 @@ class FactoryScene(QGraphicsScene):
     def remove_connection(self, line) -> None:
         if line in self._connections:
             self._connections.remove(line)
-        self.removeItem(line)
+        try:
+            self.removeItem(line)
+        except RuntimeError:
+            pass  # C++ object already deleted
 
     def remove_group(self, group) -> None:
         """Correctly remove a group from the scene and internal tracking."""
         if group in self._groups:
             self._groups.remove(group)
-        self.removeItem(group)
+        try:
+            self.removeItem(group)
+        except RuntimeError:
+            pass  # C++ object already deleted
 
     def all_nodes(self):
         return list(self._machines)
@@ -183,8 +192,20 @@ class FactoryScene(QGraphicsScene):
             get_recipe_by_id,
         )
 
-        placed = [n.to_db_dict() for n in self._machines]
-        conns  = [c.to_db_dict() for c in self._connections]
+        # Build data — skip any C++ deleted objects gracefully
+        placed = []
+        for n in list(self._machines):
+            try:
+                placed.append(n.to_db_dict())
+            except RuntimeError:
+                # Node's C++ side was already deleted — remove stale ref
+                self._machines.remove(n)
+        conns = []
+        for c in list(self._connections):
+            try:
+                conns.append(c.to_db_dict())
+            except RuntimeError:
+                self._connections.remove(c)
 
         recipes   = get_all_recipes()
         machines  = get_all_machines()
@@ -195,34 +216,41 @@ class FactoryScene(QGraphicsScene):
         graph  = build_graph(placed, conns)
         result = calculate_production(graph, recipes, machines, materials)
 
-        for node in self._machines:
-            lookup_id = node.db_id or id(node)
-            nr = result.nodes.get(lookup_id)
-            if nr:
-                node.apply_result(nr)
+        for node in list(self._machines):
+            try:
+                lookup_id = node.db_id or id(node)
+                nr = result.nodes.get(lookup_id)
+                if nr:
+                    node.apply_result(nr)
+            except RuntimeError:
+                if node in self._machines:
+                    self._machines.remove(node)
 
-        for conn in self._connections:
-            # 1. Push flow/status from production engine
-            lookup_id = conn.conn_db_id or id(conn)
-            cr = result.connections.get(lookup_id)
-            if cr:
-                conn.apply_result(cr)
+        for conn in list(self._connections):
+            try:
+                # 1. Push flow/status from production engine
+                lookup_id = conn.conn_db_id or id(conn)
+                cr = result.connections.get(lookup_id)
+                if cr:
+                    conn.apply_result(cr)
 
-            # 2. Check material mismatch: source output ≠ target input
-            src_node = conn.src_port.parent_node
-            tgt_node = conn.tgt_port.parent_node
-            mismatch = False
-            src_rid = getattr(src_node, "recipe_id", None)
-            tgt_rid = getattr(tgt_node, "recipe_id", None)
-            if src_rid and tgt_rid:
-                src_r = recipe_map.get(src_rid)
-                tgt_r = recipe_map.get(tgt_rid)
-                if src_r and tgt_r:
-                    # Check if any output of src matches any input of tgt
-                    src_outs = {m["material_id"] for m in src_r.get("materials", []) if not m["is_input"]}
-                    tgt_ins  = {m["material_id"] for m in tgt_r.get("materials", []) if m["is_input"]}
-                    mismatch = len(src_outs.intersection(tgt_ins)) == 0
-            conn.set_mismatch(mismatch)
+                # 2. Check material mismatch: source output ≠ target input
+                src_node = conn._original_src_node
+                tgt_node = conn._original_tgt_node
+                mismatch = False
+                src_rid = getattr(src_node, "recipe_id", None)
+                tgt_rid = getattr(tgt_node, "recipe_id", None)
+                if src_rid and tgt_rid:
+                    src_r = recipe_map.get(src_rid)
+                    tgt_r = recipe_map.get(tgt_rid)
+                    if src_r and tgt_r:
+                        src_outs = {m["material_id"] for m in src_r.get("materials", []) if not m["is_input"]}
+                        tgt_ins  = {m["material_id"] for m in tgt_r.get("materials", []) if m["is_input"]}
+                        mismatch = len(src_outs.intersection(tgt_ins)) == 0
+                conn.set_mismatch(mismatch)
+            except RuntimeError:
+                if conn in self._connections:
+                    self._connections.remove(conn)
 
     # ------------------------------------------------------------------
     # Grouping Logic
@@ -284,8 +312,8 @@ class FactoryScene(QGraphicsScene):
                 self._clipboard["nodes"].append({
                     "id": id(item),  # Internal ref for connection mapping
                     "machine_data": item.machine_data,
-                    "recipe_id": item.current_recipe_id,
-                    "clock_speed": item.clock_speed,
+                    "recipe_id": item.recipe_id,
+                    "clock_speed": item._clock_speed,
                     "pos": item.pos()
                 })
         
@@ -312,6 +340,7 @@ class FactoryScene(QGraphicsScene):
 
         from ui.machine_node import MachineNode
         from ui.connection_line import ConnectionLine
+        from database.crud import add_placed_node, add_connection
         
         # Clear current selection so we select the new ones
         self.clearSelection()
@@ -322,10 +351,22 @@ class FactoryScene(QGraphicsScene):
         # 1. Paste Nodes
         for data in self._clipboard["nodes"]:
             new_pos = data["pos"] + offset
+            
+            # Persist to DB first so we get a valid db_id
+            db_id = add_placed_node(
+                project_id=self.project_id,
+                machine_id=data["machine_data"]["id"],
+                recipe_id=data["recipe_id"],
+                pos_x=new_pos.x(),
+                pos_y=new_pos.y(),
+                clock_speed=data["clock_speed"],
+            )
+            
             node = MachineNode(
                 data["machine_data"], 
                 new_pos, 
                 self,
+                db_id=db_id,
                 recipe_id=data["recipe_id"],
                 clock_speed=data["clock_speed"]
             )
@@ -410,13 +451,17 @@ class FactoryView(QGraphicsView):
 
         painter.setPen(QPen(GRID_COLOR, 1.8))
 
+        # Batch all grid points for a single draw call (much faster)
+        points = []
         x = left
         while x <= right:
             y = top
             while y <= bottom:
-                painter.drawPoint(x, y)
+                points.append(QPointF(x, y))
                 y += gs
             x += gs
+        if points:
+            painter.drawPoints(points)
 
     # ------------------------------------------------------------------
     # Zoom
@@ -458,11 +503,21 @@ class FactoryView(QGraphicsView):
     # Pan (middle mouse button)
     # ------------------------------------------------------------------
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() in (Qt.MiddleButton, Qt.RightButton):
+        if event.button() == Qt.MiddleButton:
             self._pan_active = True
             self._pan_start  = event.position()
             self.setCursor(Qt.ClosedHandCursor)
             event.accept()
+        elif event.button() == Qt.RightButton:
+            # Right-click on empty canvas → pan; on items → ignore so contextMenuEvent fires
+            item = self.itemAt(event.position().toPoint())
+            if item is None:
+                self._pan_active = True
+                self._pan_start  = event.position()
+                self.setCursor(Qt.ClosedHandCursor)
+                event.accept()
+            else:
+                event.ignore()  # MUST ignore so Qt generates contextMenuEvent
         else:
             super().mousePressEvent(event)
 
@@ -481,7 +536,7 @@ class FactoryView(QGraphicsView):
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if event.button() in (Qt.MiddleButton, Qt.RightButton):
+        if self._pan_active and event.button() in (Qt.MiddleButton, Qt.RightButton):
             self._pan_active = False
             self.setCursor(Qt.ArrowCursor)
             event.accept()
@@ -524,6 +579,8 @@ class FactoryView(QGraphicsView):
                 conn._delete_self()
             for node in selected_nodes:
                 node._delete_self()
+            if selected_nodes or selected_conns:
+                scene.recalculate()
             event.accept()
         else:
             super().keyPressEvent(event)
@@ -550,10 +607,11 @@ class FactoryView(QGraphicsView):
 
         if item:
             if isinstance(item, SubFactoryNode):
-                # SubFactoryNode has its own context menu logic, but we can add more here
-                pass
+                # Let the SubFactoryNode handle its own context menu
+                super().contextMenuEvent(event)
+                return
             
-            # Global actions
+            # Global actions (only for non-group items)
             act_del = QAction("❌ Delete", self)
             act_del.setShortcut("Del")
             # Reuse logic from keyPressEvent

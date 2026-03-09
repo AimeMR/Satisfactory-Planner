@@ -5,6 +5,7 @@ All functions accept/return plain Python dicts or lists of dicts.
 """
 
 from __future__ import annotations
+import sqlite3
 from .db import get_connection
 
 

@@ -1,0 +1,2 @@
+2026-03-09 11:12:44,291 [INFO] satisfactory_planner: [DB] Migrating schema from v0 to v3
+2026-03-09 11:12:44,294 [INFO] satisfactory_planner: [DB] Tables initialized (Schema v3).
