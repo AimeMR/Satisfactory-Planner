@@ -663,7 +663,10 @@ class MainWindow(QMainWindow):
             cat_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable) 
             # Note: We need some flags to allow expansion but we handle non-selection in dblclick
             cat_item.setForeground(0, QColor(_ACCENT))
-            cat_item.setFont(0, QFont("Segoe UI", 9, QFont.Bold))
+            font = QFont("Segoe UI", 9)
+            font.setPixelSize(12)
+            font.setBold(True)
+            cat_item.setFont(0, font)
             cat_item.setData(0, Qt.UserRole + 1, cat_name) # Identifier for state lookup
             
             # Machine Items

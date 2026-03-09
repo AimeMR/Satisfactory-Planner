@@ -212,8 +212,8 @@ class FactoryScene(QGraphicsScene):
             src_node = conn.src_port.parent_node
             tgt_node = conn.tgt_port.parent_node
             mismatch = False
-            src_rid = src_node.recipe_id
-            tgt_rid = tgt_node.recipe_id
+            src_rid = getattr(src_node, "recipe_id", None)
+            tgt_rid = getattr(tgt_node, "recipe_id", None)
             if src_rid and tgt_rid:
                 src_r = recipe_map.get(src_rid)
                 tgt_r = recipe_map.get(tgt_rid)

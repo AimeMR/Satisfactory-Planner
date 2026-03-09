@@ -174,32 +174,21 @@ class MachineNode(QGraphicsItem):
         return ports
 
     # ------------------------------------------------------------------
-    # Recipe combo
+    # Recipe Selector (Proxy Widget)
     # ------------------------------------------------------------------
     def _build_combo(self, scene) -> None:
-        # Logistics nodes don't need a recipe combo
         is_logistics = "Splitter" in self.machine_data["name"] or "Merger" in self.machine_data["name"]
         if is_logistics:
             return
 
         from database.crud import get_recipes_for_machine
         recipes = get_recipes_for_machine(self.machine_data["id"])
-
-        combo = QComboBox()
-        # The patch implies self._combo might exist and need clearing,
-        # but _build_combo is called during init when _combo is None.
-        # Assuming the intent is to clear if this method were re-run,
-        # or that self._combo is assigned earlier in a different flow.
-        # For initial build, clear() is not strictly necessary on a new QComboBox.
-        # However, to faithfully apply the patch, we'll add it, assuming
-        # self._combo will be assigned later in this method.
-        if self._combo: # Check if it's already assigned, though it shouldn't be here
-            self._combo.clear()
         
+        combo = QComboBox()
         combo.addItem(tr("select_recipe"), None)
         for r in recipes:
             combo.addItem(r["name"], r["id"])
-            if r["id"] == self.recipe_id: # Changed from current_recipe_id
+            if r["id"] == self.recipe_id:
                 combo.setCurrentIndex(combo.count() - 1)
 
         combo.setStyleSheet("""
@@ -209,7 +198,6 @@ class MachineNode(QGraphicsItem):
                 border: 1px solid #4a4a8a;
                 border-radius: 4px;
                 padding: 2px 6px;
-                font-size: 10px;
             }
             QComboBox QAbstractItemView {
                 background: #16213e;
@@ -222,19 +210,18 @@ class MachineNode(QGraphicsItem):
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(combo)
         proxy.setPos(10, 44)
-        proxy.resize(self.w - 20, 25)
-        proxy.setZValue(100)  # Always stay on top for the dropdown
+        proxy.resize(max(self.w - 20, 50), 25)
+        proxy.setZValue(100)
 
         self._combo = combo
         self._proxy = proxy
 
     def _on_recipe_changed(self, index: int) -> None:
-        if self._combo is None:
+        if getattr(self, "_combo", None) is None:
             return
-        self.recipe_id = self._combo.currentData() # Changed from current_recipe_id
+        self.recipe_id = self._combo.currentData()
         scene = self.scene()
-        if not self.recipe_id: # Changed from current_recipe_id
-            # Clear stats immediately if recipe deselected
+        if not self.recipe_id:
             self._output_rate = 0.0
             self._inputs = []
             self._status = "no_recipe"
@@ -242,6 +229,9 @@ class MachineNode(QGraphicsItem):
         
         if scene and hasattr(scene, "recalculate"):
             scene.recalculate()
+
+    def setVisible(self, visible: bool) -> None:
+        super().setVisible(visible)
 
     # ------------------------------------------------------------------
     # itemChange — auto-update connections on move
@@ -310,7 +300,9 @@ class MachineNode(QGraphicsItem):
         # ── Machine name ───────────────────────────────────────────────────────────
         painter.setPen(QPen(QColor("#ffffff")))
         font_size = 9 if self.is_logistics else 10
-        name_font = QFont("Segoe UI", font_size, QFont.Bold)
+        name_font = QFont("Segoe UI", font_size)
+        name_font.setPixelSize(font_size)
+        name_font.setBold(True)
         painter.setFont(name_font)
         painter.drawText(QRectF(10, 0, self.w - 20, header_h),
                          Qt.AlignVCenter | Qt.AlignLeft,
@@ -319,9 +311,10 @@ class MachineNode(QGraphicsItem):
         # ── Stats ───────────────────────────────────────────────────────────────
         if self._status != "no_recipe" or self.is_logistics:
             stat_font = QFont("Segoe UI", 9)
+            stat_font.setPixelSize(9)
             painter.setFont(stat_font)
 
-            y = header_h + 8 if self.is_logistics else 84
+            y = header_h + 8 if self.is_logistics else 76
             
             from database.crud import get_setting
             show_output = get_setting("show_output", "true") == "true"
@@ -354,6 +347,7 @@ class MachineNode(QGraphicsItem):
                 y += 6
                 
                 inp_font = QFont("Segoe UI", 8)
+                inp_font.setPixelSize(8)
                 painter.setFont(inp_font)
                 painter.setPen(QPen(QColor("#aaddff")))
                 for inp in self._inputs:
@@ -363,8 +357,10 @@ class MachineNode(QGraphicsItem):
                     y += 14
 
         # ── Port labels (Hide IN/OUT if logistics to keep it clean) ──────
+        # ── Port labels (Hide IN/OUT if logistics to keep it clean) ──────
         if not self.is_logistics:
             port_font = QFont("Segoe UI", 8)
+            port_font.setPixelSize(8)
             painter.setFont(port_font)
             for port in self.input_ports:
                 painter.setPen(QPen(QColor("#4a90d9")))

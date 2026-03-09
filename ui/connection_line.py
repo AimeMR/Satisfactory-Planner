@@ -8,8 +8,8 @@ TempConnectionLine – rubber-band line shown while dragging.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsTextItem, QGraphicsItem
-from PySide6.QtCore    import Qt, QPointF, QRectF
+from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsItem
+from PySide6.QtCore    import Qt, QPointF, QRectF, QSizeF
 from PySide6.QtGui import (
     QPainterPath, QPen, QColor, QBrush, QFont,
     QPainter
@@ -26,21 +26,54 @@ _LABEL_BG    = QColor(0, 0, 0, 160)
 # Bezier control-point horizontal offset
 _CTRL_OFFSET = 100
 
-class ConnectionLabel(QGraphicsTextItem):
+class ConnectionLabel(QGraphicsItem):
     """
     A text label with a semi-transparent 'pill' background for better readability.
     """
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setZValue(20)
-        self.setFont(QFont("Segoe UI", 8, QFont.Bold))
+        self.text1 = ""
+        self.color1 = QColor("#ffffff")
+        self.text2 = ""
+        self.color2 = QColor("#ffffff")
+        self._text_rect = QRectF(0, 0, 0, 0)
+        self._font = QFont("Segoe UI", 8)
+        self._font.setPixelSize(8)
+        self._font.setBold(True)
+        
+    def set_data(self, t1: str, c1: QColor, t2: str, c2: QColor):
+        changed = False
+        if t1 != self.text1 or t2 != self.text2:
+            changed = True
+        self.text1 = t1
+        self.color1 = c1 or QColor("#ffffff")
+        self.text2 = t2
+        self.color2 = c2 or QColor("#ffffff")
+        
+        if changed:
+            self.prepareGeometryChange()
+            from PySide6.QtGui import QFontMetricsF
+            fmt = QFontMetricsF(self._font)
+            w1 = fmt.horizontalAdvance(self.text1) if self.text1 else 0
+            w2 = fmt.horizontalAdvance(" " + self.text2) if self.text2 else 0
+            h = fmt.height()
+            
+            width = max(0.1, w1 + w2)
+            height = max(0.1, h)
+            self._text_rect = QRectF(0, 0, width, height)
+            self.update()
 
     def boundingRect(self):
-        # Add some padding for the pill
-        r = super().boundingRect()
+        if not self.text1 and not self.text2:
+            return QRectF()
+        r = self._text_rect
         return QRectF(r.x() - 6, r.y() - 2, r.width() + 12, r.height() + 4)
 
     def paint(self, painter, option, widget=None):
+        if not self.text1 and not self.text2:
+            return
+            
         painter.setRenderHint(QPainter.Antialiasing)
         # ── Draw Background Pill ──
         rect = self.boundingRect()
@@ -48,9 +81,24 @@ class ConnectionLabel(QGraphicsTextItem):
         painter.setPen(QPen(QColor(255, 255, 255, 40), 1)) # Subtle border
         painter.drawRoundedRect(rect, 8, 8)
         
-        # ── Draw Original Text ──
-        # We need to offset the painter slightly because we expanded the boundingRect
-        super().paint(painter, option, widget)
+        # ── Draw Text ──
+        painter.setFont(self._font)
+        
+        from PySide6.QtGui import QFontMetricsF
+        fmt = QFontMetricsF(self._font)
+        
+        x = 0
+        y = fmt.ascent()
+        
+        if self.text1:
+            painter.setPen(QPen(self.color1))
+            painter.drawText(QPointF(x, y), self.text1)
+            x += fmt.horizontalAdvance(self.text1)
+            
+        if self.text2:
+            x += fmt.horizontalAdvance(" ")
+            painter.setPen(QPen(self.color2))
+            painter.drawText(QPointF(x, y), self.text2)
 
 
 class ConnectionLine(QGraphicsPathItem):
@@ -208,20 +256,21 @@ class ConnectionLine(QGraphicsPathItem):
             return
 
         if self._material_mismatch:
-            html = f"<span style='color:#ff1744; font-weight:bold;'>{tr('mat_mismatch')}</span>"
+            self._label.set_data(tr('mat_mismatch'), QColor("#ff1744"), "", None)
         elif self._mat_name:
-            # White material name, Yellow rate
-            html = (f"<span style='color:#ffffff;'>{self._mat_name}</span> "
-                    f"<span style='color:#ffd54f;'>{self._flow_rate:.1f}{tr('items_min_short')}</span>")
+            self._label.set_data(
+                self._mat_name, 
+                QColor("#ffffff"), 
+                f"{self._flow_rate:.1f}{tr('items_min_short')}", 
+                QColor("#ffd54f")
+            )
         else:
-            html = ""
+            self._label.set_data("", None, "", None)
         
-        if not html:
+        if not self._label.text1 and not self._label.text2:
             self._label.setVisible(False)
         else:
             self._label.setVisible(True)
-            if self._label.toHtml() != html:
-                self._label.setHtml(html)
 
     # ------------------------------------------------------------------
     # Hover highlight

@@ -1,7 +1,7 @@
 from __future__ import annotations
 import PySide6.QtWidgets as QtWidgets
 from PySide6.QtCore import Qt, QRectF, QPointF
-from PySide6.QtGui import QColor, QPen, QBrush, QFont, QPainterPath
+from PySide6.QtGui import QColor, QPen, QBrush, QFont, QPainterPath, QPainter
 from ui.port_item import PortItem
 
 class SubFactoryNode(QtWidgets.QGraphicsItem):
@@ -62,6 +62,9 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
         path = QPainterPath()
         if self.is_collapsed:
             path.addRect(self.boundingRect())
+            # Add proxy ports to shape so they can be clicked/hovered
+            for port in self.proxy_ports:
+                path.addEllipse(port.mapToItem(self, port.boundingRect()).boundingRect())
         else:
             # Expanded: Only the border and the label area are clickable.
             brect = self.boundingRect()
@@ -86,7 +89,7 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
             
     def _draw_collapsed(self, painter):
         # Draw a sleek box (Glassmorphism style)
-        painter.setRenderHint(painter.Antialiasing)
+        painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(QPen(QColor("#00d2ff"), 2))
         painter.setBrush(QBrush(QColor(0, 210, 255, 40)))
         
@@ -98,12 +101,24 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
         painter.drawRoundedRect(QRectF(0, 0, self.w, 30), 12, 12)
         
         # Title
-        painter.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        font = QFont("Segoe UI", 10)
+        font.setPixelSize(10)
+        font.setBold(True)
+        painter.setFont(font)
         painter.setPen(QColor("white"))
-        painter.drawText(QRectF(0, 0, self.w, 30), Qt.AlignCenter, self.name)
+        painter.drawText(QRectF(30, 0, self.w - 30, 30), Qt.AlignCenter, self.name)
         
+        # Draw + / - Button Top Left
+        painter.setPen(QPen(QColor("white"), 2))
+        painter.drawRect(QRectF(8, 8, 14, 14))
+        painter.drawLine(10, 15, 20, 15)
+        if self.is_collapsed:
+            painter.drawLine(15, 10, 15, 20) # Draw the vertical line for '+'
+
         # Stats summary (placeholder)
-        painter.setFont(QFont("Segoe UI", 8))
+        font1 = QFont("Segoe UI", 8)
+        font1.setPixelSize(10)
+        painter.setFont(font1)
         painter.drawText(QRectF(0, 35, self.w, 65), Qt.AlignCenter, 
                          f"{len(self.members)} Machines\nProduction Optimized")
 
@@ -115,12 +130,23 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(self.boundingRect())
         
-        # Label at top-left
-        painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
-        painter.setPen(QColor("#00d2ff"))
+        # Draw + / - Button Top Left
         brect = self.boundingRect()
+        btn_rect = QRectF(brect.left() + 5, brect.top() + 5, 20, 20)
+        painter.setPen(QPen(QColor("#00d2ff"), 2))
+        painter.drawRect(btn_rect)
+        painter.drawLine(btn_rect.left() + 4, btn_rect.center().y(), btn_rect.right() - 4, btn_rect.center().y())
+        if self.is_collapsed:
+            painter.drawLine(btn_rect.center().x(), btn_rect.top() + 4, btn_rect.center().x(), btn_rect.bottom() - 4)
+
+        # Label at top-left next to button
+        font2 = QFont("Segoe UI", 9)
+        font2.setPixelSize(12)
+        font2.setBold(True)
+        painter.setFont(font2)
+        painter.setPen(QColor("#00d2ff"))
         # Draw label at the top of the padding area
-        painter.drawText(QRectF(brect.left() + 5, brect.top(), 300, 30), 
+        painter.drawText(QRectF(brect.left() + 35, brect.top(), 300, 30), 
                          Qt.AlignLeft | Qt.AlignVCenter, self.name.upper())
 
     def itemChange(self, change, value):
@@ -132,8 +158,31 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
                 for m in self.members:
                     m.setPos(m.pos() + delta)
                 self._last_pos = new_pos
+                
+            # Update paths for any external connections attached to our proxy ports
+            if self.is_collapsed:
+                for port in self.proxy_ports:
+                    for conn in port.connections:
+                        conn.update_path()
+                        
         return super().itemChange(change, value)
         
+    def mousePressEvent(self, event):
+        pos = event.pos()
+        # Check if clicked on the +/- button
+        if self.is_collapsed:
+            btn_rect = QRectF(8, 8, 14, 14)
+        else:
+            brect = self.boundingRect()
+            btn_rect = QRectF(brect.left() + 5, brect.top() + 5, 20, 20)
+            
+        if btn_rect.contains(pos):
+            self._toggle_state()
+            event.accept()
+            return
+            
+        super().mousePressEvent(event)
+
     def contextMenuEvent(self, event):
         menu = QtWidgets.QMenu()
         toggle_txt = "Expand" if self.is_collapsed else "Collapse"
@@ -217,6 +266,7 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
         proxy = PortItem(ptype, self, self, index=index, side="left" if ptype=="in" else "right")
         proxy.setPos(x, y)
         self.proxy_ports.append(proxy)
+        proxy.show() # Ensure it's visually shown
         
         # Store original ports and visibility
         self.connection_storage[conn] = (conn.src_port, conn.tgt_port, conn.isVisible())
@@ -233,6 +283,7 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
             conn.tgt_port = proxy
             proxy.connections.append(conn)
             
+        conn.setVisible(True) # Force it to show since the port is external
         conn.update_path()
 
     def _restore_original_ports(self):
