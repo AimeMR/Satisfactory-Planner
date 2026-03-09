@@ -170,7 +170,7 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
     # Context menu: Collapse/Expand + Disband Group
     # ------------------------------------------------------------------
     def contextMenuEvent(self, event):
-        from PySide6.QtWidgets import QMenu
+        from PySide6.QtWidgets import QMenu, QInputDialog
         from PySide6.QtGui import QAction
 
         menu = QMenu()
@@ -185,6 +185,9 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
         act_toggle = QAction(toggle_txt)
         menu.addAction(act_toggle)
 
+        act_rename = QAction("✏️ Rename Group")
+        menu.addAction(act_rename)
+
         menu.addSeparator()
 
         act_ungroup = QAction("🔓 Disband Group")
@@ -194,8 +197,20 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
 
         if chosen == act_toggle:
             self._toggle_state()
+        elif chosen == act_rename:
+            self._rename_group()
         elif chosen == act_ungroup:
             self._ungroup()
+
+    def _rename_group(self):
+        from PySide6.QtWidgets import QInputDialog
+        from database.crud import rename_group
+        new_name, ok = QInputDialog.getText(None, "Rename Group", "New name:", text=self.name)
+        if ok and new_name.strip():
+            self.name = new_name.strip()
+            rename_group(self.group_id, self.name)
+            self.prepareGeometryChange()
+            self.update()
 
     # ------------------------------------------------------------------
     # Toggle collapse / expand
