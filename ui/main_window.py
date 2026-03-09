@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QTreeWidget, QTreeWidgetItem, QLabel, QSplitter,
     QStatusBar, QFrame, QComboBox, QPushButton, QCheckBox,
-    QInputDialog, QMessageBox, QFileDialog, QMenu,
+    QInputDialog, QMessageBox, QFileDialog, QMenu, QDialog,
 )
 from PySide6.QtCore    import Qt, QPointF
 from PySide6.QtGui     import QColor, QFont, QIcon, QAction
@@ -187,6 +187,47 @@ class MainWindow(QMainWindow):
         self.toolbar_title.setStyleSheet(f"color: {_ACCENT}; font-weight: bold; font-size: 14px; letter-spacing: 1px;")
         layout.addWidget(self.toolbar_title)
         
+        layout.addStretch()
+
+        # ── Database Selector ──
+        self.db_label = QLabel("Database:")
+        self.db_label.setStyleSheet("color: #888; font-size: 11px; font-weight: bold;")
+        layout.addWidget(self.db_label)
+
+        self.db_combo = QComboBox()
+        self.db_combo.setFixedWidth(180)
+        self.db_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: {_SIDEBAR_ITEM};
+                border: 1px solid {_BORDER};
+                border-radius: 4px;
+                padding: 5px 10px;
+                color: #00d2ff;
+                font-weight: bold;
+            }}
+        """)
+        self.db_combo.currentIndexChanged.connect(self._on_db_changed)
+        layout.addWidget(self.db_combo)
+
+        self.new_db_btn = QPushButton("+")
+        self.new_db_btn.setFixedSize(30, 30)
+        self.new_db_btn.setToolTip("New Database")
+        self.new_db_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {_SIDEBAR_ITEM};
+                border: 1px solid {_BORDER};
+                border-radius: 4px;
+                color: white;
+                font-weight: bold;
+                font-size: 16px;
+            }}
+            QPushButton:hover {{ border-color: #00d2ff; color: #00d2ff; }}
+        """)
+        self.new_db_btn.clicked.connect(self._on_new_database)
+        layout.addWidget(self.new_db_btn)
+
+        self._populate_databases()
+
         layout.addStretch()
         
         # Project Selector
@@ -520,6 +561,148 @@ class MainWindow(QMainWindow):
         self._update_status()
         self._status.showMessage(f"Language switched to {new_lang.upper()}", 3000)
 
+    # ------------------------------------------------------------------
+    # Database Management
+    # ------------------------------------------------------------------
+    def _populate_databases(self) -> None:
+        """Load .db filenames from databases/ folder into the combo."""
+        from database.db import list_databases, get_active_db_name
+
+        self.db_combo.blockSignals(True)
+        self.db_combo.clear()
+
+        dbs = list_databases()
+        active = get_active_db_name()
+
+        for db_name in dbs:
+            display = db_name.replace(".db", "")
+            self.db_combo.addItem(display, db_name)
+            if db_name == active:
+                self.db_combo.setCurrentIndex(self.db_combo.count() - 1)
+
+        self.db_combo.blockSignals(False)
+
+    def _on_db_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        db_name = self.db_combo.currentData()
+        from database.db import get_active_db_name
+        if db_name == get_active_db_name():
+            return
+
+        # 1. Save current layout before switching
+        self._save_layout()
+
+        # 2. Close old connection, switch, initialise new DB
+        from database.db import close_connection, set_db_path, initialize_db
+        close_connection()
+        set_db_path(db_name)
+        initialize_db()
+        # NOTE: seed_db() not called — other databases may be for different games
+
+        # 3. Reload everything
+        self.current_project_id = 1
+        from database.crud import get_setting, set_setting
+        self.current_project_id = int(get_setting("current_project_id", "1"))
+        self.scene.project_id = self.current_project_id
+
+        self._populate_machine_list()
+        self._populate_projects()
+        self.scene.clear()
+        self.scene._machines.clear()
+        self.scene._connections.clear()
+        self.scene._groups.clear()
+        self._load_layout()
+        self._update_status()
+        self._status.showMessage(f"Switched to database: {db_name}", 3000)
+
+    def _on_new_database(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(
+            self, "New Database",
+            "Enter a name for the new database:\n"
+            "(Example: 'factorio' will create 'factorio.db')"
+        )
+        if ok and name.strip():
+            db_name = name.strip()
+            if not db_name.endswith(".db"):
+                db_name += ".db"
+
+            # Check if already exists
+            from database.db import list_databases
+            if db_name in list_databases():
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Error", f"Database '{db_name}' already exists.")
+                return
+
+            # Save current project first
+            self._save_layout()
+
+            # Switch to new DB (initialize_db creates the schema)
+            from database.db import close_connection, set_db_path, initialize_db
+            close_connection()
+            set_db_path(db_name)
+            initialize_db()
+
+            # Reset state for blank DB
+            self.current_project_id = 1
+            from database.crud import set_setting
+            set_setting("current_project_id", "1")
+            self.scene.project_id = 1
+
+            self._populate_databases()
+            self._populate_machine_list()
+            self._populate_projects()
+            self.scene.clear()
+            self.scene._machines.clear()
+            self.scene._connections.clear()
+            self.scene._groups.clear()
+            self._load_layout()
+            self._update_status()
+            self._status.showMessage(f"Created new database: {db_name}", 3000)
+
+    # ------------------------------------------------------------------
+    # Add Element (Material / Machine / Recipe)
+    # ------------------------------------------------------------------
+    def _on_add_element(self) -> None:
+        from ui.add_element_dialog import (
+            AddElementTypeDialog, AddMaterialDialog,
+            AddMachineDialog, AddRecipeDialog,
+        )
+
+        # Step 1: Ask what type
+        type_dlg = AddElementTypeDialog(self)
+        if type_dlg.exec() != QDialog.Accepted:
+            return
+
+        chosen = type_dlg.chosen_type
+
+        # Step 2: Show the correct form
+        if chosen == "material":
+            dlg = AddMaterialDialog(self)
+            if dlg.exec() == QDialog.Accepted:
+                from database.crud import add_material
+                add_material(dlg.result_data["name"], dlg.result_data["type"])
+                self._status.showMessage(f"Material '{dlg.result_data['name']}' added.", 3000)
+
+        elif chosen == "machine":
+            dlg = AddMachineDialog(self)
+            if dlg.exec() == QDialog.Accepted:
+                from database.crud import add_machine
+                d = dlg.result_data
+                add_machine(d["name"], d["category"], d["base_power"],
+                            d["inputs_allowed"], d["outputs_allowed"])
+                self._populate_machine_list()
+                self._status.showMessage(f"Machine '{d['name']}' added.", 3000)
+
+        elif chosen == "recipe":
+            dlg = AddRecipeDialog(self)
+            if dlg.exec() == QDialog.Accepted:
+                from database.crud import add_recipe
+                d = dlg.result_data
+                add_recipe(d["name"], d["machine_id"], d["ingredients"], d["craft_time"])
+                self._status.showMessage(f"Recipe '{d['name']}' added.", 3000)
+
     def _build_info_menu(self) -> QFrame:
         from ui.i18n import tr
         from database.crud import get_setting
@@ -655,6 +838,24 @@ class MainWindow(QMainWindow):
 
         # Populate
         self._populate_machine_list()
+
+        # Add Element button
+        self.add_element_btn = QPushButton("➕ Add Element")
+        self.add_element_btn.setFixedHeight(34)
+        self.add_element_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {_SIDEBAR_ITEM};
+                border: 1px solid {_BORDER};
+                border-radius: 4px;
+                color: #00d2ff;
+                font-weight: bold;
+                font-size: 12px;
+                margin: 6px;
+            }}
+            QPushButton:hover {{ border-color: {_ACCENT}; color: {_ACCENT}; background: #1a2a5e; }}
+        """)
+        self.add_element_btn.clicked.connect(self._on_add_element)
+        layout.addWidget(self.add_element_btn)
 
         # Footer hint
         self.sidebar_hint = QLabel(tr("double_click_place"))

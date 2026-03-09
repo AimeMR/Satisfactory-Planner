@@ -1,28 +1,88 @@
 """
 database/db.py
 Manages the SQLite connection, table initialization, and schema migrations.
+Supports multiple database files stored in a `databases/` folder.
 """
 
 import sqlite3
 import os
+import glob
 import logging
 
 # Configure logging
 logger = logging.getLogger("satisfactory_planner")
 
-# The .db file lives at the project root
-_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "satisfactory.db")
+# ---------------------------------------------------------------------------
+# Path management
+# ---------------------------------------------------------------------------
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+_DATABASES_DIR = os.path.join(_PROJECT_ROOT, "databases")
+
+# Default DB name
+_DEFAULT_DB = "satisfactory.db"
+
+# Active database filename (just the name, not full path)
+_active_db_name: str = _DEFAULT_DB
+
 _connection: sqlite3.Connection | None = None
 
 # Current schema version — increment when adding migrations
 _SCHEMA_VERSION = 3
 
 
+def _ensure_databases_dir() -> None:
+    """Create the databases/ folder if it doesn't exist."""
+    os.makedirs(_DATABASES_DIR, exist_ok=True)
+
+
+def _resolve_db_path(db_name: str | None = None) -> str:
+    """Return the absolute path to a database file inside databases/."""
+    _ensure_databases_dir()
+    name = db_name or _active_db_name
+    return os.path.join(_DATABASES_DIR, name)
+
+
+def _migrate_legacy_db() -> None:
+    """Move the old project-root satisfactory.db into databases/ if needed."""
+    legacy = os.path.join(_PROJECT_ROOT, "satisfactory.db")
+    target = os.path.join(_DATABASES_DIR, _DEFAULT_DB)
+    if os.path.isfile(legacy) and not os.path.isfile(target):
+        _ensure_databases_dir()
+        os.rename(legacy, target)
+        logger.info("[DB] Migrated legacy satisfactory.db → databases/satisfactory.db")
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def list_databases() -> list[str]:
+    """Return all .db filenames inside the databases/ folder."""
+    _ensure_databases_dir()
+    _migrate_legacy_db()
+    files = glob.glob(os.path.join(_DATABASES_DIR, "*.db"))
+    return sorted(os.path.basename(f) for f in files)
+
+
+def get_active_db_name() -> str:
+    """Return the filename of the currently active database."""
+    return _active_db_name
+
+
+def set_db_path(db_name: str) -> None:
+    """Switch to a different database file. Closes the current connection."""
+    global _active_db_name
+    close_connection()
+    _active_db_name = db_name
+    logger.info("[DB] Active database set to: %s", db_name)
+
+
 def get_connection() -> sqlite3.Connection:
     """Return a singleton SQLite connection with foreign keys enabled."""
     global _connection
     if _connection is None:
-        _connection = sqlite3.connect(os.path.abspath(_DB_PATH))
+        path = _resolve_db_path()
+        _connection = sqlite3.connect(path)
         _connection.row_factory = sqlite3.Row          # access columns by name
         _connection.execute("PRAGMA foreign_keys = ON")
         _connection.commit()
@@ -57,6 +117,9 @@ def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
 
 def initialize_db() -> None:
     """Create all tables if they do not exist and run any pending migrations."""
+    _ensure_databases_dir()
+    _migrate_legacy_db()
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -158,4 +221,4 @@ def initialize_db() -> None:
         _set_schema_version(conn, _SCHEMA_VERSION)
 
     conn.commit()
-    logger.info("[DB] Tables initialized (Schema v%d).", _SCHEMA_VERSION)
+    logger.info("[DB] Tables initialized (Schema v%d) — DB: %s", _SCHEMA_VERSION, _active_db_name)
