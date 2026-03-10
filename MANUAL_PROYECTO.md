@@ -26,7 +26,9 @@ Permite al usuario:
 - Conectar salidas con entradas arrastrando puertos.
 - Visualizar tasas de producción, consumo y déficits/excedentes en tiempo real.
 - Organizar máquinas en grupos (sub-fábricas) colapsables.
-- Gestionar múltiples proyectos independientes.
+- Gestionar **múltiples bases de datos** aislando diferentes configuraciones (e.g., base, con mods).
+- Añadir **Materiales, Máquinas y Recetas personalizadas** mediante cuadros de diálogo integrados.
+- Gestionar múltiples proyectos independientes delegados a su respectiva base de datos.
 - Exportar e importar proyectos como archivos JSON.
 - Cambiar entre Inglés y Español con un solo clic.
 
@@ -64,7 +66,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-La base de datos SQLite (`satisfactory.db`) se crea automáticamente en la primera ejecución con todos los materiales, máquinas y recetas del juego precargados.
+La base de datos SQLite por defecto (`satisfactory.db`) se crea automáticamente en la primera ejecución dentro de la carpeta `databases/` con todos los materiales, máquinas y recetas de los Niveles 1 al 8 precargados.
 
 ---
 
@@ -77,10 +79,12 @@ Satisfactory-Planner/
 │
 ├── database/                # Capa de datos
 │   ├── __init__.py
-│   ├── db.py               # Conexión SQLite, esquema y migraciones
+│   ├── db.py               # Gestión de DBs múltiples, SQLite, esquema y migraciones
 │   ├── crud.py             # Operaciones CRUD para todas las tablas
 │   ├── seed_data.py        # Datos base del juego (materiales, máquinas, recetas)
 │   └── io.py               # Exportar/importar proyectos como JSON
+│
+├── databases/               # Almacenamiento local de archivos .db
 │
 ├── engine/                  # Motor de cálculo
 │   ├── __init__.py
@@ -241,7 +245,7 @@ Esta es la fórmula oficial de overclock de Satisfactory.
 
 | Componente | Archivo | Descripción |
 |-----------|---------|-------------|
-| **MainWindow** | `main_window.py` | Ventana raíz con barra lateral, barra de herramientas y canvas |
+| **MainWindow** | `main_window.py` | Ventana raíz con barra lateral dinámica, barra de herramientas principal compactada y canvas |
 | **FactoryScene** | `canvas.py` | Escena de Qt que contiene todos los nodos y conexiones |
 | **FactoryView** | `canvas.py` | Vista con cuadrícula de puntos, zoom (scroll) y paneo (botón central/derecho) |
 | **MachineNode** | `machine_node.py` | Nodo visual de máquina con combo de recetas y puertos |
@@ -249,6 +253,7 @@ Esta es la fórmula oficial de overclock de Satisfactory.
 | **PortItem** | `port_item.py` | Círculo de puerto (azul=entrada, naranja=salida) |
 | **SubFactoryNode** | `sub_factory_node.py` | Contenedor visual para grupos colapsables |
 | **ConnectionLabel** | `connection_line.py` | Etiqueta flotante sobre las conexiones |
+| **Add Element Dialogs**| `add_element_dialog.py` | Asistente de ventanas secuenciales para la creación custom de Material/Máquina/Receta |
 
 ### Paleta de Colores
 
@@ -329,14 +334,29 @@ Cada tipo de máquina tiene un color distintivo:
 3. Los nodos se encierran en un grupo con borde punteado.
 4. Clic en el botón **+/-** del grupo para expandir/colapsar.
 
-### Gestionar Proyectos
-| Acción | Botón |
-|--------| ------|
-| Nuevo proyecto | **+** en la barra de herramientas |
-| Renombrar | **✎** |
-| Exportar a JSON | **📤** |
-| Importar desde JSON | **📥** |
-| Eliminar | **🗑️** |
+### Alternar / Cerrar Barra Lateral
+La aplicación cuenta con una barra lateral colapsable. Se esconde pulsando el botón con la flecha `◀` en el divisor vertical (Splitter). Al esconderse, la barra lateral desaparece, pero la franja fina del botón (`▶`) se mantiene visible para poder volver a acceder rápidamente.
+
+### Añadir Elementos Personalizados
+1. En la parte inferior de la barra lateral, pulsa el botón `➕ Add Element`.
+2. Escoge entre **Material**, **Machine** o **Recipe**.
+3. Rellena los datos en el cuadro de diálogo:
+   - Para las recetas, debes indicar el tiempo de crafteo, la máquina operaria, y sus ingredientes correspondientes (es posible eliminar ingredientes pulsando el botón ➖).
+4. El nuevo elemento se guardará en tu base de datos actual para todos los proyectos compartidos.
+
+### Bases de Datos y Proyectos
+La app permite alternar entre bases de datos enteras desde el combo de la barra superior, ideal cuando se planifica con diferentes modos de juego y dependencias (ej: DB Vainilla vs DB Mods).
+Desde la esquina superior izquierda se gestionan Proyectos y DBs con los correspondientes menús desplegables.
+
+Las opciones concretas de los Proyectos están consolidadas bajo el botón del engranaje **⚙**:
+
+| Acción Proyecto | Opción en Menú ⚙ |
+|-----------------|------------------|
+| Nuevo proyecto  | **➕ New Project**  |
+| Renombrar       | **✏️ Rename**     |
+| Exportar a JSON | **📤 Export**     |
+| Importar JSON   | **📥 Import**     |
+| Eliminar        | **🗑️ Delete**     |
 
 ### Menú de Información (esquina inferior)
 Controla qué información se muestra en los nodos:

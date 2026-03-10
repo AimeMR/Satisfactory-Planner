@@ -7,9 +7,12 @@ A sophisticated, node-based factory planning application for **Satisfactory**, d
 - **Interactive Canvas**: A powerful node-based editor using `PySide6` for placing and connecting production machines.
 - **Real-time Statistics**: Instant calculation of production/consumption ratios, item flow (items/min), and power requirements.
 - **Complete Database**: Pre-loaded with all materials, machines, and recipes from **Tiers 1 to 8** and **Phase 4** of the Space Elevator.
-- **Multi-Project Support**: Create, save, and switch between multiple factory designs seamlessly.
+- **Multi-Database Support**: Organize your workflows into separate `.db` files managed within the `databases/` directory.
+- **Custom Elements**: Easily add your own custom Materials, Machines, and Recipes directly from the UI to plan modded or hypothetical setups.
+- **Multi-Project Support**: Create, save, and switch between multiple factory designs seamlessly within any database.
 - **Customizable UI**: 
     - **Global Visibility**: Toggle stats for power, inputs, outputs, and belt flow via a sleek glassmorphism menu.
+    - **Optimized Workspace**: Clean top toolbar with consolidated project actions, line styling, and a collapsible sidebar with a sticky toggle button.
     - **Multi-Language**: Fully localized in English and Spanish.
     - **Isolation**: Each project has its own isolated environment for machine placement and connections.
 
@@ -22,7 +25,8 @@ A sophisticated, node-based factory planning application for **Satisfactory**, d
 
 ## 📁 Project Structure
 
-- `database/`: SQLite schema, seeding logic (`seed_data.py`), and CRUD operations (`crud.py`).
+- `databases/`: Directory where all SQLite database files (like `satisfactory.db`) are stored.
+- `database/`: SQLite schema, seeding logic (`seed_data.py`), multi-db management, and CRUD operations (`crud.py`).
 - `ui/`: Main window, custom node graphics (`machine_node.py`), and connection rendering.
 - `logic/`: Calculation engine for production rates and efficiency.
 - `i18n/`: Translation keys and localization management.
