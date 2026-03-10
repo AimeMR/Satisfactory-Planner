@@ -79,13 +79,13 @@ class MainWindow(QMainWindow):
         self._sidebar = self._build_sidebar()
 
         # Splitter: sidebar | canvas
-        layout_splitter = QSplitter(Qt.Horizontal)
-        layout_splitter.addWidget(self._sidebar)
-        layout_splitter.addWidget(self.view)
-        layout_splitter.setStretchFactor(0, 0)
-        layout_splitter.setStretchFactor(1, 1)
-        layout_splitter.setSizes([220, 1180])
-        layout_splitter.setHandleWidth(1)
+        self.layout_splitter = QSplitter(Qt.Horizontal)
+        self.layout_splitter.addWidget(self._sidebar)
+        self.layout_splitter.addWidget(self.view)
+        self.layout_splitter.setStretchFactor(0, 0)
+        self.layout_splitter.setStretchFactor(1, 1)
+        self.layout_splitter.setSizes([220, 1180])
+        self.layout_splitter.setHandleWidth(1)
 
         # Toolbar (Top)
         self._toolbar = self._build_toolbar()
@@ -95,7 +95,7 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         main_layout.addWidget(self._toolbar)
-        main_layout.addWidget(layout_splitter)
+        main_layout.addWidget(self.layout_splitter)
         
         container = QWidget()
         container.setLayout(main_layout)
@@ -145,15 +145,141 @@ class MainWindow(QMainWindow):
         
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(10, 0, 20, 0)
-        layout.setSpacing(15)
+        layout.setSpacing(12)
 
-        # Sidebar Toggle Button
         from ui.i18n import tr
-        self.toggle_btn = QPushButton(tr("sidebar_toggle"))
-        self.toggle_btn.setFixedWidth(120)
-        self.toggle_btn.setCheckable(True)
-        self.toggle_btn.setChecked(True)
-        self.toggle_btn.setStyleSheet(f"""
+
+        _combo_css = f"""
+            QComboBox {{
+                background: {_SIDEBAR_ITEM};
+                border: 1px solid {_BORDER};
+                border-radius: 4px;
+                padding: 5px 10px;
+                color: white;
+                font-weight: bold;
+            }}
+            QComboBox::drop-down {{ border: none; }}
+            QComboBox QAbstractItemView {{
+                background: {_SIDEBAR_BG};
+                selection-background-color: {_SIDEBAR_ITEM};
+                border: 1px solid {_BORDER};
+                color: white;
+            }}
+        """
+        _small_btn_css = f"""
+            QPushButton {{
+                background: {_SIDEBAR_ITEM};
+                border: 1px solid {_BORDER};
+                border-radius: 4px;
+                color: white;
+                font-weight: bold;
+                font-size: 16px;
+            }}
+            QPushButton:hover {{ border-color: {_ACCENT}; color: {_ACCENT}; }}
+        """
+
+        # ── 1. Title (Far Left) ──
+        self.toolbar_title = QLabel(tr("app_title"))
+        self.toolbar_title.setStyleSheet(f"color: {_ACCENT}; font-weight: bold; font-size: 14px; letter-spacing: 1px;")
+        layout.addWidget(self.toolbar_title)
+
+        layout.addSpacing(10)
+
+        # ── 2. Database Selector ──
+        self.db_label = QLabel("DB:")
+        self.db_label.setStyleSheet("color: #888; font-size: 11px; font-weight: bold;")
+        layout.addWidget(self.db_label)
+
+        self.db_combo = QComboBox()
+        self.db_combo.setFixedWidth(150)
+        self.db_combo.setStyleSheet(_combo_css)
+        self.db_combo.currentIndexChanged.connect(self._on_db_changed)
+        layout.addWidget(self.db_combo)
+
+        self.new_db_btn = QPushButton("+")
+        self.new_db_btn.setFixedSize(30, 30)
+        self.new_db_btn.setToolTip("New Database")
+        self.new_db_btn.setStyleSheet(_small_btn_css)
+        self.new_db_btn.clicked.connect(self._on_new_database)
+        layout.addWidget(self.new_db_btn)
+
+        self._populate_databases()
+
+        layout.addSpacing(8)
+
+        # ── 3. Project Selector ──
+        self.proj_label = QLabel(tr("project") + ":")
+        self.proj_label.setStyleSheet("color: #888; font-size: 11px; font-weight: bold;")
+        layout.addWidget(self.proj_label)
+
+        self.project_combo = QComboBox()
+        self.project_combo.setFixedWidth(180)
+        self.project_combo.setStyleSheet(_combo_css)
+        self.project_combo.currentIndexChanged.connect(self._on_project_changed)
+        layout.addWidget(self.project_combo)
+
+        # ── 4. Project Actions Dropdown ──
+        self.proj_actions_btn = QPushButton("⚙")
+        self.proj_actions_btn.setFixedSize(30, 30)
+        self.proj_actions_btn.setToolTip(tr("project") + " actions")
+        self.proj_actions_btn.setStyleSheet(_small_btn_css)
+
+        proj_menu = QMenu(self)
+        proj_menu.setStyleSheet(f"""
+            QMenu {{
+                background: {_SIDEBAR_BG};
+                border: 1px solid {_BORDER};
+                color: white;
+                padding: 4px;
+            }}
+            QMenu::item {{
+                padding: 6px 20px;
+                border-radius: 4px;
+            }}
+            QMenu::item:selected {{
+                background: {_SIDEBAR_ITEM};
+                color: {_ACCENT};
+            }}
+        """)
+
+        self.act_new_proj    = proj_menu.addAction("➕ " + tr("new_proj"))
+        self.act_rename_proj = proj_menu.addAction("✏️ " + tr("rename_proj"))
+        proj_menu.addSeparator()
+        self.act_export_proj = proj_menu.addAction("📤 " + tr("export_proj"))
+        self.act_import_proj = proj_menu.addAction("📥 " + tr("import_proj"))
+        proj_menu.addSeparator()
+        self.act_delete_proj = proj_menu.addAction("🗑️ " + tr("delete_proj_title"))
+
+        self.act_new_proj.triggered.connect(self._on_new_project)
+        self.act_rename_proj.triggered.connect(self._on_rename_project)
+        self.act_export_proj.triggered.connect(self._on_export_project)
+        self.act_import_proj.triggered.connect(self._on_import_project)
+        self.act_delete_proj.triggered.connect(self._on_delete_project)
+
+        self.proj_actions_btn.setMenu(proj_menu)
+        layout.addWidget(self.proj_actions_btn)
+
+        self._populate_projects()
+
+        # ── Spacer ──
+        layout.addStretch()
+
+        # ── 5. Line Style (Right side) ──
+        self.style_label = QLabel(tr("line_style") + ":")
+        self.style_label.setStyleSheet("color: #888; font-size: 11px; font-weight: bold;")
+        layout.addWidget(self.style_label)
+
+        self.style_combo = QComboBox()
+        self.style_combo.addItems([tr("style_rounded"), tr("style_straight"), tr("style_manhattan")])
+        self.style_combo.setFixedWidth(150)
+        self.style_combo.setStyleSheet(_combo_css)
+        self.style_combo.currentIndexChanged.connect(self._on_style_changed)
+        layout.addWidget(self.style_combo)
+
+        # ── 6. Language Toggle (Far Right) ──
+        self.lang_btn = QPushButton(tr("lang_toggle"))
+        self.lang_btn.setFixedWidth(60)
+        self.lang_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {_SIDEBAR_ITEM};
                 border: 1px solid {_BORDER};
@@ -163,186 +289,13 @@ class MainWindow(QMainWindow):
                 font-weight: bold;
                 font-size: 11px;
             }}
-            QPushButton:checked {{
-                background: {_ACCENT};
-                color: {_SIDEBAR_BG};
-            }}
             QPushButton:hover {{
                 border-color: {_ACCENT};
             }}
         """)
-        self.toggle_btn.clicked.connect(self._toggle_sidebar)
-        layout.addWidget(self.toggle_btn)
-
-        # Language Toggle
-        from ui.i18n import get_language
-        self.lang_btn = QPushButton(tr("lang_toggle"))
-        self.lang_btn.setFixedWidth(80)
-        self.lang_btn.setStyleSheet(self.toggle_btn.styleSheet())
         self.lang_btn.clicked.connect(self._on_toggle_language)
         layout.addWidget(self.lang_btn)
 
-        # Title area
-        self.toolbar_title = QLabel(tr("app_title"))
-        self.toolbar_title.setStyleSheet(f"color: {_ACCENT}; font-weight: bold; font-size: 14px; letter-spacing: 1px;")
-        layout.addWidget(self.toolbar_title)
-        
-        layout.addStretch()
-
-        # ── Database Selector ──
-        self.db_label = QLabel("Database:")
-        self.db_label.setStyleSheet("color: #888; font-size: 11px; font-weight: bold;")
-        layout.addWidget(self.db_label)
-
-        self.db_combo = QComboBox()
-        self.db_combo.setFixedWidth(180)
-        self.db_combo.setStyleSheet(f"""
-            QComboBox {{
-                background: {_SIDEBAR_ITEM};
-                border: 1px solid {_BORDER};
-                border-radius: 4px;
-                padding: 5px 10px;
-                color: #00d2ff;
-                font-weight: bold;
-            }}
-        """)
-        self.db_combo.currentIndexChanged.connect(self._on_db_changed)
-        layout.addWidget(self.db_combo)
-
-        self.new_db_btn = QPushButton("+")
-        self.new_db_btn.setFixedSize(30, 30)
-        self.new_db_btn.setToolTip("New Database")
-        self.new_db_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {_SIDEBAR_ITEM};
-                border: 1px solid {_BORDER};
-                border-radius: 4px;
-                color: white;
-                font-weight: bold;
-                font-size: 16px;
-            }}
-            QPushButton:hover {{ border-color: #00d2ff; color: #00d2ff; }}
-        """)
-        self.new_db_btn.clicked.connect(self._on_new_database)
-        layout.addWidget(self.new_db_btn)
-
-        self._populate_databases()
-
-        layout.addStretch()
-        
-        # Project Selector
-        self.proj_label = QLabel(tr("project") + ":")
-        self.proj_label.setStyleSheet("color: #888; font-size: 11px; font-weight: bold;")
-        layout.addWidget(self.proj_label)
-        
-        self.project_combo = QComboBox()
-        self.project_combo.setFixedWidth(200)
-        self.project_combo.setStyleSheet(f"""
-            QComboBox {{
-                background: {_SIDEBAR_ITEM};
-                border: 1px solid {_BORDER};
-                border-radius: 4px;
-                padding: 5px 10px;
-                color: {_ACCENT};
-                font-weight: bold;
-            }}
-        """)
-        self.project_combo.currentIndexChanged.connect(self._on_project_changed)
-        layout.addWidget(self.project_combo)
-        
-        self.new_proj_btn = QPushButton("+")
-        self.new_proj_btn.setFixedSize(30, 30)
-        self.new_proj_btn.setToolTip(tr("new_proj"))
-        self.new_proj_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {_SIDEBAR_ITEM};
-                border: 1px solid {_BORDER};
-                border-radius: 4px;
-                color: white;
-                font-weight: bold;
-                font-size: 16px;
-            }}
-            QPushButton:hover {{ border-color: {_ACCENT}; color: {_ACCENT}; }}
-        """)
-        self.new_proj_btn.clicked.connect(self._on_new_project)
-        layout.addWidget(self.new_proj_btn)
-        
-        self.rename_proj_btn = QPushButton("✎")
-        self.rename_proj_btn.setFixedSize(30, 30)
-        self.rename_proj_btn.setToolTip(tr("rename_proj"))
-        self.rename_proj_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {_SIDEBAR_ITEM};
-                border: 1px solid {_BORDER};
-                border-radius: 4px;
-                color: white;
-                font-size: 14px;
-            }}
-            QPushButton:hover {{ border-color: {_ACCENT}; color: {_ACCENT}; }}
-        """)
-        self.rename_proj_btn.clicked.connect(self._on_rename_project)
-        layout.addWidget(self.rename_proj_btn)
-
-        self.export_proj_btn = QPushButton("📤")
-        self.export_proj_btn.setFixedSize(30, 30)
-        self.export_proj_btn.setToolTip(tr("export_proj"))
-        self.export_proj_btn.setStyleSheet(self.rename_proj_btn.styleSheet())
-        self.export_proj_btn.clicked.connect(self._on_export_project)
-        layout.addWidget(self.export_proj_btn)
-        
-        self.import_proj_btn = QPushButton("📥")
-        self.import_proj_btn.setFixedSize(30, 30)
-        self.import_proj_btn.setToolTip(tr("import_proj"))
-        self.import_proj_btn.setStyleSheet(self.rename_proj_btn.styleSheet())
-        self.import_proj_btn.clicked.connect(self._on_import_project)
-        layout.addWidget(self.import_proj_btn)
-
-        self.delete_proj_btn = QPushButton("🗑️")
-        self.delete_proj_btn.setFixedSize(30, 30)
-        self.delete_proj_btn.setToolTip(tr("delete_proj_title"))
-        self.delete_proj_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {_SIDEBAR_ITEM};
-                border: 1px solid {_BORDER};
-                border-radius: 4px;
-                color: #ff5555;
-                font-size: 14px;
-            }}
-            QPushButton:hover {{ border-color: #ff5555; background: #330000; }}
-        """)
-        self.delete_proj_btn.clicked.connect(self._on_delete_project)
-        layout.addWidget(self.delete_proj_btn)
-
-        self._populate_projects()
-
-        layout.addStretch()
-        
-        # Line Style Dropdown
-        self.style_label = QLabel(tr("line_style") + ":")
-        self.style_label.setStyleSheet("color: #888; font-size: 11px; font-weight: bold;")
-        layout.addWidget(self.style_label)
-        
-        self.style_combo = QComboBox()
-        self.style_combo.addItems([tr("style_rounded"), tr("style_straight"), tr("style_manhattan")])
-        self.style_combo.setFixedWidth(180)
-        self.style_combo.setStyleSheet(f"""
-            QComboBox {{
-                background: {_SIDEBAR_ITEM};
-                border: 1px solid {_BORDER};
-                border-radius: 4px;
-                padding: 5px 10px;
-                color: white;
-            }}
-            QComboBox::drop-down {{ border: none; }}
-            QComboBox QAbstractItemView {{
-                background: {_SIDEBAR_BG};
-                selection-background-color: {_SIDEBAR_ITEM};
-                border: 1px solid {_BORDER};
-            }}
-        """)
-        self.style_combo.currentIndexChanged.connect(self._on_style_changed)
-        layout.addWidget(self.style_combo)
-        
         return bar
 
     def _on_style_changed(self, index: int) -> None:
@@ -355,13 +308,25 @@ class MainWindow(QMainWindow):
         from database.crud import set_setting
         set_setting("line_style", style)
 
-    def _toggle_sidebar(self, checked: bool) -> None:
-        self._sidebar.setVisible(checked)
-        self._status.showMessage(f"Sidebar {'shown' if checked else 'hidden'}", 2000)
+    def _toggle_sidebar(self) -> None:
+        is_visible = self._sidebar_content.isVisible()
+        self._sidebar_content.setVisible(not is_visible)
+        # Swap the arrow icon
+        self.toggle_btn.setText("▶" if is_visible else "◀")
+        
+        # Force the wrapper to shrink in the QSplitter
+        target_w = 28 if is_visible else 248
+        self._sidebar.setFixedWidth(target_w)
+        if hasattr(self, "layout_splitter"):
+            current_sizes = self.layout_splitter.sizes()
+            total = sum(current_sizes)
+            self.layout_splitter.setSizes([target_w, total - target_w])
+        
+        self._status.showMessage(f"Sidebar {'hidden' if is_visible else 'shown'}", 2000)
         
         # PERSIST SETTING
         from database.crud import set_setting
-        set_setting("sidebar_visible", "true" if checked else "false")
+        set_setting("sidebar_visible", "false" if is_visible else "true")
 
     # ------------------------------------------------------------------
     # Project Handlers
@@ -523,13 +488,12 @@ class MainWindow(QMainWindow):
         # REFRESH UI
         self.setWindowTitle(tr("app_title"))
         self.lang_btn.setText(tr("lang_toggle"))
-        self.toggle_btn.setText(tr("sidebar_toggle"))
         
         # New static labels
         self.toolbar_title.setText(tr("app_title"))
         self.proj_label.setText(tr("project") + ":")
         self.style_label.setText(tr("line_style") + ":")
-        self.sidebar_header.setText("  " + tr("machine_library"))
+        self.sidebar_header_label.setText("  " + tr("machine_library"))
         self.sidebar_hint.setText(tr("double_click_place"))
         
         # Re-populate language-sensitive areas
@@ -544,12 +508,12 @@ class MainWindow(QMainWindow):
         self.style_combo.setCurrentIndex(old_style)
         self.style_combo.blockSignals(False)
         
-        # Update tooltips
-        self.new_proj_btn.setToolTip(tr("new_proj"))
-        self.rename_proj_btn.setToolTip(tr("rename_proj"))
-        self.export_proj_btn.setToolTip(tr("export_proj"))
-        self.import_proj_btn.setToolTip(tr("import_proj"))
-        self.delete_proj_btn.setToolTip(tr("delete_proj_title"))
+        # Update project actions menu text
+        self.act_new_proj.setText("➕ " + tr("new_proj"))
+        self.act_rename_proj.setText("✏️ " + tr("rename_proj"))
+        self.act_export_proj.setText("📤 " + tr("export_proj"))
+        self.act_import_proj.setText("📥 " + tr("import_proj"))
+        self.act_delete_proj.setText("🗑️ " + tr("delete_proj_title"))
         
         # Refresh info menu strings
         self.info_header.setText(tr("show_info"))
@@ -784,28 +748,42 @@ class MainWindow(QMainWindow):
             )
 
     def _build_sidebar(self) -> QWidget:
-        container = QWidget()
-        container.setFixedWidth(220)
-        container.setStyleSheet(f"""
+        wrapper = QWidget()
+        wrap_layout = QHBoxLayout(wrapper)
+        wrap_layout.setContentsMargins(0, 0, 0, 0)
+        wrap_layout.setSpacing(0)
+
+        self._sidebar_content = QWidget()
+        self._sidebar_content.setFixedWidth(220)
+        self._sidebar_content.setStyleSheet(f"""
             QWidget {{ background: {_SIDEBAR_BG}; }}
         """)
 
-        layout = QVBoxLayout(container)
+        layout = QVBoxLayout(self._sidebar_content)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Header
+        # Header without toggle button
         from ui.i18n import tr
-        self.sidebar_header = QLabel("  " + tr("machine_library"))
-        self.sidebar_header.setStyleSheet(f"""
-            background: {_ACCENT};
+        header_widget = QWidget()
+        header_widget.setFixedHeight(36)
+        header_widget.setStyleSheet(f"background: {_ACCENT};")
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(8, 0, 4, 0)
+        header_layout.setSpacing(0)
+
+        self.sidebar_header_label = QLabel("  " + tr("machine_library"))
+        self.sidebar_header_label.setStyleSheet("""
             color: white;
             font-size: 11px;
             font-weight: bold;
             letter-spacing: 2px;
-            padding: 10px 0;
+            background: transparent;
         """)
-        layout.addWidget(self.sidebar_header)
+        header_layout.addWidget(self.sidebar_header_label)
+        header_layout.addStretch()
+
+        layout.addWidget(header_widget)
 
         # Machine list (Tree)
         self._machine_tree = QTreeWidget()
@@ -863,7 +841,38 @@ class MainWindow(QMainWindow):
         self.sidebar_hint.setStyleSheet(f"color: #888; font-size: 11px; padding: 8px;")
         layout.addWidget(self.sidebar_hint)
 
-        return container
+        wrap_layout.addWidget(self._sidebar_content)
+        
+        # Toggle strip
+        self._toggle_strip = QWidget()
+        self._toggle_strip.setFixedWidth(28)
+        self._toggle_strip.setStyleSheet(f"background: {_SIDEBAR_BG}; border-left: 1px solid {_BORDER}; border-right: 1px solid {_BORDER};")
+        strip_layout = QVBoxLayout(self._toggle_strip)
+        strip_layout.setContentsMargins(0, 0, 0, 0)
+        strip_layout.setSpacing(0)
+
+        self.toggle_btn = QPushButton("◀")
+        self.toggle_btn.setFixedSize(28, 36)
+        self.toggle_btn.setToolTip("Toggle sidebar")
+        self.toggle_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {_ACCENT};
+                border: none;
+                border-radius: 0px;
+                color: white;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{ background: #ff6b81; }}
+        """)
+        self.toggle_btn.clicked.connect(self._toggle_sidebar)
+        
+        strip_layout.addWidget(self.toggle_btn)
+        strip_layout.addStretch()
+
+        wrap_layout.addWidget(self._toggle_strip)
+
+        return wrapper
 
     def _populate_machine_list(self) -> None:
         """Load machine types from DB and group them by category in the Tree."""
@@ -972,8 +981,15 @@ class MainWindow(QMainWindow):
         # (The currentIndexChanged signal will trigger _on_style_changed and scene.set_line_style)
         
         is_visible = get_setting("sidebar_visible", "true") == "true"
-        self.toggle_btn.setChecked(is_visible)
-        self._sidebar.setVisible(is_visible)
+        self._sidebar_content.setVisible(is_visible)
+        self.toggle_btn.setText("◀" if is_visible else "▶")
+        
+        target_w = 248 if is_visible else 28
+        self._sidebar.setFixedWidth(target_w)
+        if hasattr(self, "layout_splitter"):
+            current_sizes = self.layout_splitter.sizes()
+            total = sum(current_sizes) if sum(current_sizes) > 0 else 1400
+            self.layout_splitter.setSizes([target_w, total - target_w])
 
         node_map: dict[int, MachineNode] = {}  # db_id → MachineNode
         group_map: dict[int, SubFactoryNode] = {}
