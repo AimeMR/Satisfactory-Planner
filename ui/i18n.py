@@ -54,6 +54,7 @@ _STRINGS = {
         "delete_conn": "Delete Connection",
         "mat_mismatch": "! MATERIAL MISMATCH !",
         "project_u": "Project",
+        "auto_gen_factory": "Auto-Generate Factory",
     },
     "es": {
         "app_title": "PLANIFICADOR SATISFACTORY",
@@ -103,6 +104,7 @@ _STRINGS = {
         "delete_conn": "Eliminar Conexión",
         "mat_mismatch": "! MATERIAL INCOMPATIBLE !",
         "project_u": "Proyecto",
+        "auto_gen_factory": "Auto-Generar Fábrica",
     }
 }
 

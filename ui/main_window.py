@@ -498,6 +498,7 @@ class MainWindow(QMainWindow):
         self.style_label.setText(tr("line_style") + ":")
         self.sidebar_header_label.setText("  " + tr("machine_library"))
         self.sidebar_hint.setText(tr("double_click_place"))
+        self.auto_gen_btn.setText("🪄 " + tr("auto_gen_factory"))
         
         # Re-populate language-sensitive areas
         self._populate_machine_list()
@@ -670,6 +671,36 @@ class MainWindow(QMainWindow):
                 add_recipe(d["name"], d["machine_id"], d["ingredients"], d["craft_time"])
                 self._status.showMessage(f"Recipe '{d['name']}' added.", 3000)
 
+    def _on_generate_factory(self) -> None:
+        from ui.production_line_dialog import ProductionLineDialog
+        dlg = ProductionLineDialog(self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+            
+        res = dlg.result_data
+        
+        # If new project, create and switch to it first
+        if res["new_project"]:
+            from database.crud import add_project, set_setting
+            # Save current first
+            self._save_layout()
+            
+            pid = add_project(res["project_name"])
+            self.current_project_id = pid
+            set_setting("current_project_id", str(pid))
+            self._populate_projects()
+            self.scene.clear()
+            self._load_layout()
+        
+        # Now call the engine generate function
+        from engine.generator import generate_production_line
+        generate_production_line(self.current_project_id, res["material_id"], res["target_rate"])
+        
+        self._status.showMessage(f"Generated line for {res['material_name']} at {res['target_rate']}/min.", 4000)
+        self.scene.clear()
+        self._load_layout()
+        self._update_status()
+
     def _build_info_menu(self) -> QFrame:
         from ui.i18n import tr
         from database.crud import get_setting
@@ -820,7 +851,6 @@ class MainWindow(QMainWindow):
         # Populate
         self._populate_machine_list()
 
-        # Add Element button
         self.add_element_btn = QPushButton("➕ Add Element")
         self.add_element_btn.setFixedHeight(34)
         self.add_element_btn.setStyleSheet(f"""
@@ -831,12 +861,30 @@ class MainWindow(QMainWindow):
                 color: #00d2ff;
                 font-weight: bold;
                 font-size: 12px;
-                margin: 6px;
+                margin: 0px 6px 6px 6px;
             }}
             QPushButton:hover {{ border-color: {_ACCENT}; color: {_ACCENT}; background: #1a2a5e; }}
         """)
         self.add_element_btn.clicked.connect(self._on_add_element)
         layout.addWidget(self.add_element_btn)
+
+        # Auto-Generate Factory button
+        self.auto_gen_btn = QPushButton("🪄 " + tr("auto_gen_factory"))
+        self.auto_gen_btn.setFixedHeight(34)
+        self.auto_gen_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {_SIDEBAR_ITEM};
+                border: 1px solid {_BORDER};
+                border-radius: 4px;
+                color: #e94560;
+                font-weight: bold;
+                font-size: 12px;
+                margin: 0px 6px 6px 6px;
+            }}
+            QPushButton:hover {{ border-color: #ff6b81; color: #ff6b81; background: #1a2a5e; }}
+        """)
+        self.auto_gen_btn.clicked.connect(self._on_generate_factory)
+        layout.addWidget(self.auto_gen_btn)
 
         # Footer hint
         self.sidebar_hint = QLabel(tr("double_click_place"))
