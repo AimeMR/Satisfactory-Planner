@@ -2,6 +2,8 @@
 
 Una aplicación sofisticada de planificación de fábricas basada en nodos para **Satisfactory**, diseñada para ayudar a los Pioneros a diseñar, optimizar y visualizar sus líneas de producción con precisión.
 
+> **🚀 Nota sobre la Evolución del Proyecto:** El estado actual de la aplicación sirve como la base interactiva. En el futuro, el proyecto evolucionará para convertirse en un **Generador Automático de Fábricas**. La aplicación preguntará al usuario qué material final desea producir (y a qué tasa), y creará, conectará y optimizará automáticamente todas las líneas de máquinas necesarias para conseguirlo.
+
 ## 🌟 Características Principales
 
 - **Canvas Interactivo**: Un potente editor basado en nodos utilizando `PySide6` para colocar y conectar máquinas de producción.

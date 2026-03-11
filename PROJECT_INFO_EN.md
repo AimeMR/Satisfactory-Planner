@@ -2,6 +2,8 @@
 
 A sophisticated, node-based factory planning application for **Satisfactory**, designed to help Pioneers design, optimize, and visualize their production lines with precision.
 
+> **🚀 Project Evolution Notice:** The current state of the application serves as the interactive foundation. Moving forward, the project is evolving into an **Automated Factory Generator**. The app will ask the user what end material they want to produce (and at what rate), and it will automatically create, connect, and optimize all the necessary machine lines required to build it.
+
 ## 🌟 Key Features
 
 - **Interactive Canvas**: A powerful node-based editor using `PySide6` for placing and connecting production machines.

@@ -20,6 +20,8 @@
 
 **Satisfactory Planner** es una aplicación de escritorio desarrollada en **Python 3.10+** con **PySide6 (Qt 6)** para planificar cadenas de producción del videojuego *Satisfactory*.
 
+> **🚀 EVOLUCIÓN DEL PROYECTO:** Este manual documenta la fase "base" del planificador interactivo. A partir de esta fundación, el proyecto se transformará en una herramienta automática: **la aplicación preguntará al usuario qué material desea producir y generará, conectará y optimizará automáticamente toda la línea de máquinas necesaria.**
+
 Permite al usuario:
 - Colocar máquinas en un lienzo infinito con zoom y paneo.
 - Seleccionar recetas para cada máquina.
