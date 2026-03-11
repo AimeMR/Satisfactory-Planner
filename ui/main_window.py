@@ -256,7 +256,9 @@ class MainWindow(QMainWindow):
         self.act_import_proj.triggered.connect(self._on_import_project)
         self.act_delete_proj.triggered.connect(self._on_delete_project)
 
-        self.proj_actions_btn.setMenu(proj_menu)
+        self.proj_actions_btn.clicked.connect(
+            lambda: proj_menu.popup(self.proj_actions_btn.mapToGlobal(self.proj_actions_btn.rect().bottomLeft()))
+        )
         layout.addWidget(self.proj_actions_btn)
 
         self._populate_projects()
@@ -415,6 +417,7 @@ class MainWindow(QMainWindow):
         from ui.i18n import tr
         path, _ = QFileDialog.getSaveFileName(self, tr("export_proj"), "", "Project Files (*.json)")
         if path:
+            self._save_layout()
             from database.io import export_project_to_json
             if export_project_to_json(self.current_project_id, path):
                 self._status.showMessage(tr("export_success", os.path.basename(path)), 3000)
@@ -1048,6 +1051,11 @@ class MainWindow(QMainWindow):
                     src_port.connections.append(line)
                     tgt_port.connections.append(line)
 
+        # 3. Initialize collapsed proxy ports for groups loaded as collapsed
+        for group in group_map.values():
+            if group.is_collapsed:
+                group._create_proxy_ports()
+
         if node_map:
             self.scene.recalculate()
         self._update_status()
@@ -1123,8 +1131,8 @@ class MainWindow(QMainWindow):
                     new_id = add_connection(
                         source_node_id=src_id,
                         target_node_id=tgt_id,
-                        source_port_idx=getattr(conn.src_port, 'index', 0),
-                        target_port_idx=getattr(conn.tgt_port, 'index', 0),
+                        source_port_idx=getattr(conn._original_src_port, 'index', 0),
+                        target_port_idx=getattr(conn._original_tgt_port, 'index', 0),
                         material_id=conn.material_id,
                     )
                     conn.conn_db_id = new_id

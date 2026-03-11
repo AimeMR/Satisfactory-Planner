@@ -129,7 +129,9 @@ class ConnectionLine(QGraphicsPathItem):
         self._mat_type:          str   = "solid"   # "solid" | "liquid" | "gas"
         self._material_mismatch: bool  = False      # source output != target input
 
-        # Original node refs — used when connection is proxied through a collapsed group
+        # Original port / node refs — used when connection is proxied through a collapsed group
+        self._original_src_port = src_port
+        self._original_tgt_port = tgt_port
         self._original_src_node = src_port.parent_node
         self._original_tgt_node = tgt_port.parent_node
 

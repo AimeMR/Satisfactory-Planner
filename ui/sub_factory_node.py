@@ -245,8 +245,8 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
         
         for conn in list(self.factory_scene._connections):
             try:
-                src_node = conn.src_port.parent_node
-                tgt_node = conn.tgt_port.parent_node
+                src_node = conn._original_src_node
+                tgt_node = conn._original_tgt_node
             except RuntimeError:
                 continue
             
@@ -254,7 +254,7 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
             tgt_in = tgt_node in in_nodes
             
             if src_in and tgt_in:
-                self.connection_storage[conn] = (conn.src_port, conn.tgt_port, conn.isVisible())
+                self.connection_storage[conn] = "both"
                 conn.setVisible(False)
             elif src_in and not tgt_in:
                 self._add_proxy(conn, "out", out_proxy_count)
@@ -272,15 +272,17 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
         self.proxy_ports.append(proxy)
         proxy.show()
         
-        self.connection_storage[conn] = (conn.src_port, conn.tgt_port, conn.isVisible())
+        self.connection_storage[conn] = ptype
         
         try:
             if ptype == "out":
-                conn.src_port.connections.remove(conn)
+                if conn in conn.src_port.connections:
+                    conn.src_port.connections.remove(conn)
                 conn.src_port = proxy
                 proxy.connections.append(conn)
             else:
-                conn.tgt_port.connections.remove(conn)
+                if conn in conn.tgt_port.connections:
+                    conn.tgt_port.connections.remove(conn)
                 conn.tgt_port = proxy
                 proxy.connections.append(conn)
         except (RuntimeError, ValueError):
@@ -291,27 +293,43 @@ class SubFactoryNode(QtWidgets.QGraphicsItem):
 
     def _restore_original_ports(self):
         """Return all connections to their original machine ports."""
-        for conn, (old_src, old_tgt, old_vis) in self.connection_storage.items():
-            try:
+        for conn, ptype in self.connection_storage.items():
+            if ptype == "out":
                 if conn.src_port in self.proxy_ports:
-                    conn.src_port.connections.remove(conn)
+                    try:
+                        conn.src_port.connections.remove(conn)
+                    except ValueError:
+                        pass
+                
+                conn.src_port = conn._original_src_port
+                try:
+                    if conn not in conn.src_port.connections:
+                        conn.src_port.connections.append(conn)
+                except RuntimeError:
+                    pass
+                conn.setVisible(True)
+                
+            elif ptype == "in":
                 if conn.tgt_port in self.proxy_ports:
-                    conn.tgt_port.connections.remove(conn)
-            except (RuntimeError, ValueError):
-                pass
+                    try:
+                        conn.tgt_port.connections.remove(conn)
+                    except ValueError:
+                        pass
+                        
+                conn.tgt_port = conn._original_tgt_port
+                try:
+                    if conn not in conn.tgt_port.connections:
+                        conn.tgt_port.connections.append(conn)
+                except RuntimeError:
+                    pass
+                conn.setVisible(True)
+            elif ptype == "both":
+                conn.setVisible(True)
             
-            conn.src_port = old_src
-            conn.tgt_port = old_tgt
             try:
-                if conn not in old_src.connections:
-                    old_src.connections.append(conn)
-                if conn not in old_tgt.connections:
-                    old_tgt.connections.append(conn)
+                conn.update_path()
             except RuntimeError:
                 pass
-            
-            conn.setVisible(old_vis)
-            conn.update_path()
             
         for p in self.proxy_ports:
             try:
